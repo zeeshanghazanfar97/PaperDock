@@ -22,7 +22,7 @@ services:
       - "traefik.http.routers.paperdock.rule=Host(`paperdock.zeeit.dev`)"
       - "traefik.http.routers.paperdock.entrypoints=websecure"
       - "traefik.http.routers.paperdock.tls.certresolver=cloudflare"
-      - "traefik.http.routers.paperdock.middlewares=authentik@file"
+      # - "traefik.http.routers.paperdock.middlewares=authentik@file"
       - "traefik.http.services.paperdock.loadbalancer.server.port=3000"
 
 networks:
