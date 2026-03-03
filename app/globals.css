@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 31 53% 97%;
+  --foreground: 218 33% 13%;
+  --card: 0 0% 100%;
+  --card-foreground: 218 33% 13%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 218 33% 13%;
+  --primary: 200 88% 34%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 183 36% 90%;
+  --secondary-foreground: 218 33% 13%;
+  --muted: 33 26% 91%;
+  --muted-foreground: 215 16% 35%;
+  --accent: 31 85% 73%;
+  --accent-foreground: 218 33% 13%;
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 213 21% 84%;
+  --input: 213 21% 84%;
+  --ring: 200 88% 34%;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: 216 30% 8%;
+  --foreground: 210 24% 92%;
+  --card: 217 28% 12%;
+  --card-foreground: 210 24% 92%;
+  --popover: 217 28% 12%;
+  --popover-foreground: 210 24% 92%;
+  --primary: 196 86% 55%;
+  --primary-foreground: 216 30% 8%;
+  --secondary: 216 22% 18%;
+  --secondary-foreground: 210 24% 92%;
+  --muted: 216 18% 17%;
+  --muted-foreground: 215 16% 70%;
+  --accent: 32 88% 68%;
+  --accent-foreground: 216 30% 8%;
+  --destructive: 0 72% 57%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 216 20% 23%;
+  --input: 216 20% 23%;
+  --ring: 196 86% 55%;
+}
+
+* {
+  @apply border-border;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-family: "Avenir Next", "Segoe UI Variable", "IBM Plex Sans", sans-serif;
+  background-image:
+    radial-gradient(circle at 12% 16%, rgba(255, 180, 95, 0.25), transparent 32%),
+    radial-gradient(circle at 84% 12%, rgba(74, 173, 201, 0.23), transparent 28%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(242, 246, 249, 0.88));
+}
+
+.dark body {
+  background-image:
+    radial-gradient(circle at 12% 16%, rgba(255, 170, 82, 0.12), transparent 34%),
+    radial-gradient(circle at 84% 12%, rgba(74, 173, 201, 0.16), transparent 30%),
+    linear-gradient(160deg, rgba(16, 24, 37, 0.95), rgba(13, 20, 31, 0.94));
+}
+
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(22, 35, 54, 0.06) 0.5px, transparent 0.5px);
+  background-size: 3px 3px;
+  opacity: 0.3;
+}
+
+.dark .noise-overlay {
+  opacity: 0.18;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 0.5px, transparent 0.5px);
+}
+
+.panel-enter {
+  animation: fadeIn 420ms ease-out both;
+}
+
+.panel-enter-delayed {
+  animation: fadeIn 420ms ease-out 120ms both;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

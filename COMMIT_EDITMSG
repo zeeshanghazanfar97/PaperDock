@@ -1,0 +1,6 @@
+Enhance PNM support for bitonal images and improve header parsing
+
+- Added support for P4 (bitonal) PNM format in the PNMHeader class, including properties for bitonal detection and bytes per row calculation.
+- Updated the _try_parse_header function to handle P4 format and adjusted maxval handling accordingly.
+- Implemented raster processing for P4 images in build_partial_jpeg and raster_to_image functions.
+- Added unit tests to validate P4 header parsing and raster processing functionality.

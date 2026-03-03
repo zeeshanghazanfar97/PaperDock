@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  paperdock:
+    build: .
+    container_name: paperdock
+    restart: unless-stopped
+    # ports:
+    #   - "3000:3000"
+    environment:
+      NODE_ENV: production
+      CUPS_HOST: 10.2.1.103
+      SANE_HOST: 10.2.1.103
+      DATA_DIR: /data
+      RETENTION_DAYS: 30
+    volumes:
+      - ./data:/data
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.paperdock.rule=Host(`paperdock.zeeit.dev`)"
+      - "traefik.http.routers.paperdock.entrypoints=websecure"
+      - "traefik.http.routers.paperdock.tls.certresolver=cloudflare"
+      - "traefik.http.routers.paperdock.middlewares=authentik@file"
+      - "traefik.http.services.paperdock.loadbalancer.server.port=3000"
+
+networks:
+  traefik-public:
+    external: true
