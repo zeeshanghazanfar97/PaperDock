@@ -5,8 +5,8 @@ services:
     build: .
     container_name: paperdock
     restart: unless-stopped
-    ports:
-      - "10343:3000"
+    # ports:
+    #   - "10343:3000"
     environment:
       NODE_ENV: production
       CUPS_HOST: 10.2.1.103
