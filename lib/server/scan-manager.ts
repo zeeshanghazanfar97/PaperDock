@@ -7,7 +7,8 @@ import { logError, logInfo } from "@/lib/server/logger";
 import { dataPaths } from "@/lib/server/paths";
 import {
   ScannerProxyError,
-  requestProxyScan,
+  requestProxyScanProgress,
+  type ProxyScanProgressEvent,
   type ScannerProxyColorMode,
   type ScannerProxyOutputFormat
 } from "@/lib/server/scanner-proxy-client";
@@ -58,6 +59,13 @@ function summarizeText(input: string, maxChars = 700) {
     return normalized;
   }
   return `${normalized.slice(0, maxChars)}...`;
+}
+
+function toPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function buildOutputPayload(jobId: string, format: ScannerProxyOutputFormat) {
@@ -182,14 +190,14 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
 
   publish(jobId, {
     type: "scan_progress",
-    payload: { percent: 5 }
+    payload: { percent: 0 }
   });
 
   const abortController = new AbortController();
   runtimeState.abortControllers.set(jobId, abortController);
 
   try {
-    const scanResult = await requestProxyScan(
+    const completedEvent = await requestProxyScanProgress(
       {
         resolution: options.dpi,
         mode: options.mode,
@@ -197,7 +205,17 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
         timeout_seconds: Math.max(5, Math.ceil(config.SCAN_TIMEOUT_MS / 1000)),
         return_base64: true
       },
-      abortController.signal
+      {
+        signal: abortController.signal,
+        onEvent: (event: ProxyScanProgressEvent) => {
+          if (event.event === "progress" && typeof event.progress === "number") {
+            publish(jobId, {
+              type: "scan_progress",
+              payload: { percent: Math.min(99, toPercent(event.progress)) }
+            });
+          }
+        }
+      }
     );
 
     if (runtimeState.canceledJobs.has(jobId)) {
@@ -205,15 +223,15 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
       return;
     }
 
-    if (scanResult.batch_mode) {
-      throw new Error("Batch scans are not supported by this app flow");
-    }
-
-    if (!scanResult.base64_data) {
+    if (!completedEvent.base64_data) {
       throw new Error("Proxy scan response did not include base64_data");
     }
 
-    const scanBytes = Buffer.from(scanResult.base64_data, "base64");
+    if (typeof completedEvent.return_code === "number" && completedEvent.return_code !== 0) {
+      throw new Error(completedEvent.message ?? completedEvent.stderr ?? `Scan failed with code ${completedEvent.return_code}`);
+    }
+
+    const scanBytes = Buffer.from(completedEvent.base64_data, "base64");
 
     if (!scanBytes.byteLength) {
       throw new Error("Scanned file is empty");

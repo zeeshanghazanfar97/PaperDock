@@ -94,6 +94,23 @@ export interface ProxyScanResponse {
   base64_data?: string;
 }
 
+export type ProxyScanProgressEventType = "started" | "progress" | "log" | "completed" | "error";
+
+export interface ProxyScanProgressEvent {
+  event: ProxyScanProgressEventType;
+  command?: string[];
+  output_file?: string;
+  started_at_unix?: number;
+  completed_at_unix?: number;
+  timestamp_unix?: number;
+  progress?: number;
+  message?: string;
+  return_code?: number;
+  bytes_written?: number;
+  stderr?: string;
+  base64_data?: string;
+}
+
 export interface ProxyCopyRequest {
   scan: ProxyScanRequest;
   print_settings: PrintSettings;
@@ -553,6 +570,130 @@ export async function requestProxyScan(request: ProxyScanRequest, signal?: Abort
     note: asNullableString(payload.note) ?? undefined,
     base64_data: asNullableString(payload.base64_data) ?? undefined
   };
+}
+
+function parseScanProgressEvent(raw: unknown): ProxyScanProgressEvent | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const item = raw as Record<string, unknown>;
+  const eventValue = item.event;
+  if (typeof eventValue !== "string") {
+    return null;
+  }
+
+  const validEvents: ProxyScanProgressEventType[] = ["started", "progress", "log", "completed", "error"];
+  if (!validEvents.includes(eventValue as ProxyScanProgressEventType)) {
+    return null;
+  }
+
+  const event = eventValue as ProxyScanProgressEventType;
+
+  return {
+    event,
+    command: Array.isArray(item.command) ? item.command.map((value) => String(value)) : undefined,
+    output_file: asNullableString(item.output_file) ?? undefined,
+    started_at_unix: typeof item.started_at_unix === "number" ? item.started_at_unix : undefined,
+    completed_at_unix: typeof item.completed_at_unix === "number" ? item.completed_at_unix : undefined,
+    timestamp_unix: typeof item.timestamp_unix === "number" ? item.timestamp_unix : undefined,
+    progress: typeof item.progress === "number" ? item.progress : undefined,
+    message: asNullableString(item.message) ?? undefined,
+    return_code: typeof item.return_code === "number" ? item.return_code : undefined,
+    bytes_written: typeof item.bytes_written === "number" ? item.bytes_written : undefined,
+    stderr: asNullableString(item.stderr) ?? undefined,
+    base64_data: asNullableString(item.base64_data) ?? undefined
+  };
+}
+
+export async function requestProxyScanProgress(
+  request: ProxyScanRequest,
+  options: {
+    signal?: AbortSignal;
+    onEvent?: (event: ProxyScanProgressEvent) => void;
+  } = {}
+): Promise<ProxyScanProgressEvent> {
+  const response = await fetch(buildProxyApiUrl("/scan/progress"), {
+    method: "POST",
+    cache: "no-store",
+    signal: options.signal,
+    headers: noStoreHeaders({
+      "Content-Type": "application/json"
+    }),
+    body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    throw new ScannerProxyError(await readErrorMessage(response), response.status);
+  }
+
+  if (!response.body) {
+    throw new ScannerProxyError("Proxy scan progress response has no stream body", 502);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  let buffer = "";
+  let completedEvent: ProxyScanProgressEvent | null = null;
+  let sawErrorEvent = false;
+  let streamErrorMessage = "Scan failed";
+
+  const processLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    let parsedRaw: unknown;
+    try {
+      parsedRaw = JSON.parse(trimmed) as unknown;
+    } catch {
+      return;
+    }
+
+    const event = parseScanProgressEvent(parsedRaw);
+    if (!event) {
+      return;
+    }
+
+    options.onEvent?.(event);
+
+    if (event.event === "completed") {
+      completedEvent = event;
+    } else if (event.event === "error") {
+      sawErrorEvent = true;
+      streamErrorMessage = event.message ?? event.stderr ?? "Scan failed";
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      processLine(line);
+    }
+  }
+
+  buffer += decoder.decode();
+  processLine(buffer);
+
+  if (sawErrorEvent) {
+    throw new ScannerProxyError(streamErrorMessage, 502);
+  }
+
+  if (!completedEvent) {
+    throw new ScannerProxyError("Scan progress stream ended without completed event", 502);
+  }
+
+  return completedEvent;
 }
 
 export async function requestProxyScanDownload(request: ProxyScanRequest, signal?: AbortSignal): Promise<Response> {

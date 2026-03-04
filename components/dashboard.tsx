@@ -48,33 +48,12 @@ type Job = {
   artifacts: Artifact[];
 };
 
-type ScanHeader = {
-  width: number;
-  height: number;
-  channels: number;
-  dpi: number;
-  mode: "Color" | "Gray";
-  previewWidth?: number;
-  previewHeight?: number;
-  previewRowStride?: number;
-  previewColStride?: number;
-};
-
 type PageMode = "all" | "single" | "range";
 type PrintScaling = "auto" | "fit" | "fill" | "none";
 type PrintOrientation = "auto" | "portrait" | "landscape";
 type PrintSides = "one-sided" | "two-sided-long-edge" | "two-sided-short-edge";
 type CropRect = { x: number; y: number; width: number; height: number };
 type EditorBox = { x: number; y: number; width: number; height: number; scale: number; sourceWidth: number; sourceHeight: number };
-
-function decodeBase64(input: string) {
-  const raw = atob(input);
-  const array = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) {
-    array[i] = raw.charCodeAt(i);
-  }
-  return array;
-}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) {
@@ -230,7 +209,7 @@ export function Dashboard() {
   const [scanDpi, setScanDpi] = useState<string>("150");
   const [scanMode, setScanMode] = useState<"Color" | "Gray">("Color");
   const [scanProgress, setScanProgress] = useState<number>(0);
-  const [scanHeader, setScanHeader] = useState<ScanHeader | null>(null);
+  const [lastScanDpi, setLastScanDpi] = useState<number>(150);
   const [activeScanJobId, setActiveScanJobId] = useState<string | null>(null);
   const [scanDownloadUrls, setScanDownloadUrls] = useState<{ pngUrl: string; pdfUrl: string } | null>(null);
   const [editorImageLoaded, setEditorImageLoaded] = useState(false);
@@ -839,7 +818,7 @@ export function Dashboard() {
       const pngBytes = dataUrlToBytes(exportCanvas.toDataURL("image/png"));
       const document = await PDFDocument.create();
       const image = await document.embedPng(pngBytes);
-      const dpi = scanHeader?.dpi ?? 150;
+      const dpi = lastScanDpi;
       const widthPt = (exportCanvas.width * 72) / dpi;
       const heightPt = (exportCanvas.height * 72) / dpi;
       const page = document.addPage([widthPt, heightPt]);
@@ -896,92 +875,6 @@ export function Dashboard() {
     const stream = new EventSource(`/api/scan/jobs/${jobId}/events`);
     eventSourceRef.current = stream;
 
-    stream.addEventListener("scan_header", (evt) => {
-      const payload = JSON.parse((evt as MessageEvent).data) as ScanHeader;
-      setScanHeader(payload);
-      setScanProgress(0);
-      setScanDownloadUrls(null);
-
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-
-      const previewWidth = payload.previewWidth ?? payload.width;
-      const previewHeight = payload.previewHeight ?? payload.height;
-
-      canvas.width = previewWidth;
-      canvas.height = previewHeight;
-
-      const context = canvas.getContext("2d");
-      if (!context) {
-        return;
-      }
-
-      imageDataRef.current = context.createImageData(previewWidth, previewHeight);
-      dirtyRowsRef.current = null;
-      context.putImageData(imageDataRef.current, 0, 0);
-    });
-
-    stream.addEventListener("scan_rows", (evt) => {
-      const payload = JSON.parse((evt as MessageEvent).data) as {
-        startRow: number;
-        rowCount: number;
-        channels: number;
-        width: number;
-        dataBase64: string;
-      };
-
-      const imageData = imageDataRef.current;
-      if (!imageData) {
-        return;
-      }
-
-      const rawRows = decodeBase64(payload.dataBase64);
-      const width = payload.width;
-
-      for (let rowOffset = 0; rowOffset < payload.rowCount; rowOffset += 1) {
-        const globalRow = payload.startRow + rowOffset;
-
-        for (let x = 0; x < width; x += 1) {
-          const srcIndex = rowOffset * width * payload.channels + x * payload.channels;
-          const dstIndex = (globalRow * width + x) * 4;
-
-          if (payload.channels === 1) {
-            const gray = rawRows[srcIndex];
-            imageData.data[dstIndex] = gray;
-            imageData.data[dstIndex + 1] = gray;
-            imageData.data[dstIndex + 2] = gray;
-            imageData.data[dstIndex + 3] = 255;
-          } else {
-            imageData.data[dstIndex] = rawRows[srcIndex];
-            imageData.data[dstIndex + 1] = rawRows[srcIndex + 1];
-            imageData.data[dstIndex + 2] = rawRows[srcIndex + 2];
-            imageData.data[dstIndex + 3] = 255;
-          }
-        }
-      }
-
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        return;
-      }
-
-      const currentDirty = dirtyRowsRef.current;
-      const start = payload.startRow;
-      const end = payload.startRow + payload.rowCount;
-
-      if (!currentDirty) {
-        dirtyRowsRef.current = { start, end };
-      } else {
-        dirtyRowsRef.current = {
-          start: Math.min(currentDirty.start, start),
-          end: Math.max(currentDirty.end, end)
-        };
-      }
-      schedulePreviewRender();
-    });
-
     stream.addEventListener("scan_progress", (evt) => {
       const payload = JSON.parse((evt as MessageEvent).data) as { percent: number };
       setScanProgress(payload.percent);
@@ -995,7 +888,6 @@ export function Dashboard() {
         expectedRows?: number;
         actualRows?: number;
       };
-      flushPreviewRows();
       setScanProgress(100);
       setScanDownloadUrls(payload);
       void loadEditorImageFromUrl(payload.pngUrl);
@@ -1104,13 +996,13 @@ export function Dashboard() {
   async function onStartScan() {
     resetCanvas();
     setScanDownloadUrls(null);
-    setScanHeader(null);
     setCropRect(null);
     setRotationAngle(0);
     editorImageRef.current = null;
     clearRotatedCache();
     setEditorImageLoaded(false);
     drawEditorCanvas(null, 0);
+    setLastScanDpi(Number(scanDpi) || 150);
 
     const response = await fetch("/api/scan/jobs", {
       method: "POST",
@@ -1554,46 +1446,49 @@ export function Dashboard() {
 
             <Card>
               <CardHeader>
-                <CardTitle>{editorImageLoaded && !activeScanJobId ? "Scan Canvas Editor" : "Live Preview"}</CardTitle>
+                <CardTitle>{editorImageLoaded && !activeScanJobId ? "Scan Canvas Editor" : "Scan Progress"}</CardTitle>
                 <CardDescription>
-                  {editorImageLoaded && !activeScanJobId
-                    ? "The same canvas now switches to editing mode. Drag on image to select crop."
-                    : "Low-cost progressive preview while scanning is running."}
+                  {activeScanJobId
+                    ? "Only progress is shown while scanning. Full-quality result appears after completion."
+                    : editorImageLoaded
+                      ? "Drag on the image to select crop and edit the original-quality scan."
+                      : "Start a scan to load the full-quality result here."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm text-muted-foreground">
-                    <span>
-                      {activeScanJobId ? `Scanning ${activeScanJobId.slice(0, 8)}...` : "Idle"}
-                      {scanHeader ? ` (${scanHeader.width}x${scanHeader.height}, ${scanHeader.mode})` : ""}
-                      {scanHeader?.previewWidth && scanHeader?.previewHeight
-                        ? ` Preview ${scanHeader.previewWidth}x${scanHeader.previewHeight}`
-                        : ""}
-                    </span>
+                    <span>{activeScanJobId ? `Scanning ${activeScanJobId.slice(0, 8)}...` : "Idle"}</span>
                     <span>{scanProgress}%</span>
                   </div>
                   <Progress value={scanProgress} />
                 </div>
 
-                <div className="rounded-xl border bg-card/60 p-2">
-                  <div className="max-h-[560px] overflow-auto rounded-md bg-muted/40">
-                    <canvas
-                      ref={canvasRef}
-                      onMouseDown={onEditorMouseDown}
-                      onMouseMove={onEditorMouseMove}
-                      onMouseUp={finishCropSelection}
-                      onMouseLeave={finishCropSelection}
-                      className={`h-auto w-full ${editorImageLoaded && !activeScanJobId ? "cursor-crosshair" : "cursor-default"}`}
-                    />
+                {activeScanJobId ? (
+                  <div className="rounded-xl border bg-muted/30 px-4 py-12 text-center text-sm text-muted-foreground">
+                    Scanning in progress. Preview will appear once the full-quality scan is finished.
                   </div>
-                </div>
-
-                <div className="text-xs text-muted-foreground">
-                  {editorImageLoaded && !activeScanJobId
-                    ? "Editor mode: drag directly on this canvas to mark crop area."
-                    : "Preview mode: rows are rendered progressively to reduce CPU load."}
-                </div>
+                ) : editorImageLoaded ? (
+                  <>
+                    <div className="rounded-xl border bg-card/60 p-2">
+                      <div className="max-h-[560px] overflow-auto rounded-md bg-muted/40">
+                        <canvas
+                          ref={canvasRef}
+                          onMouseDown={onEditorMouseDown}
+                          onMouseMove={onEditorMouseMove}
+                          onMouseUp={finishCropSelection}
+                          onMouseLeave={finishCropSelection}
+                          className="h-auto w-full cursor-crosshair"
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">Editor mode: drag directly on this canvas to mark crop area.</div>
+                  </>
+                ) : (
+                  <div className="rounded-xl border bg-muted/30 px-4 py-12 text-center text-sm text-muted-foreground">
+                    No scan result yet.
+                  </div>
+                )}
               </CardContent>
             </Card>
 

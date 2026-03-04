@@ -118,6 +118,39 @@ For command failures, `detail` is usually:
 }
 ```
 
+## Scan Progress Stream Events
+
+`POST /scan/progress` returns newline-delimited JSON (`application/x-ndjson`).
+
+Each line is one event object. Event types:
+
+- `started`: emitted once when scan command starts
+- `progress`: emitted when `scanimage` stderr includes percentage text
+- `log`: emitted for non-percentage stderr lines
+- `completed`: emitted once on successful scan completion
+- `error`: emitted once if timeout or scan command failure occurs
+
+### Event Schema (Union)
+
+```json
+{
+  "event": "started | progress | log | completed | error",
+  "command": ["string"],
+  "output_file": "string",
+  "started_at_unix": 1741086300.123,
+  "completed_at_unix": 1741086310.456,
+  "timestamp_unix": 1741086305.789,
+  "progress": 42.5,
+  "message": "string",
+  "return_code": 0,
+  "bytes_written": 123456,
+  "stderr": "string",
+  "base64_data": "string (only when return_base64=true)"
+}
+```
+
+Not every field appears on every event type.
+
 ## Endpoints
 
 ### `GET /`
@@ -418,6 +451,35 @@ If `raw_args` or options include `--batch`, files are written by `scanimage`.
   "note": "Batch mode enabled. Files are written by scanimage according to --batch arguments."
 }
 ```
+
+---
+
+### `POST /scan/progress`
+
+Scans document and streams progress/log events while scan is running.
+
+#### Request Body
+
+`ScanRequest`
+
+#### Response `200`
+
+`application/x-ndjson` stream.
+
+Each line is a JSON event:
+
+```json
+{"event":"started","command":["scanimage","--format=png"],"output_file":"/tmp/paperdock-proxy/scan-abc.png","started_at_unix":1741086300.12}
+{"event":"progress","progress":17.4,"message":"Progress: 17.4%","timestamp_unix":1741086302.10}
+{"event":"progress","progress":56.1,"message":"Progress: 56.1%","timestamp_unix":1741086304.30}
+{"event":"completed","command":["scanimage","--format=png"],"return_code":0,"output_file":"/tmp/paperdock-proxy/scan-abc.png","bytes_written":983421,"stderr":"...","started_at_unix":1741086300.12,"completed_at_unix":1741086308.67}
+```
+
+#### Notes
+
+- Batch mode (`--batch`) is not supported for this endpoint and returns `400`.
+- On failure or timeout, stream ends with an `error` event.
+- Use `curl -N` (or equivalent) to disable output buffering in client.
 
 ---
 
