@@ -1,10 +1,9 @@
 # PaperDock
 
-PaperDock is a self-hosted print and scan desk that gives your browser a clean, no-login interface for document workflows.
+PaperDock is a self-hosted print, scan, and photocopy desk that gives your browser a clean, no-login interface for document workflows.
 
 Built with:
-- CUPS CLI (`lp`, `lpstat`, `cancel`) for print jobs.
-- SANE `scanimage` for single-page scans.
+- Proxy HTTP API for printer/scanner operations.
 - Next.js + shadcn/ui frontend.
 - SQLite + JSONL audit logs for history.
 
@@ -12,14 +11,17 @@ Built with:
 
 - Print section:
   - Upload PDF/JPG/JPEG/PNG and print.
-  - Choose printer, copies, and media option.
+  - Choose printer, copies, and print options.
   - Cancel active/submitted print jobs.
 
 - Scan section:
-  - Start single-page scan.
-  - Live line-by-line canvas updates via SSE (`scan_rows`).
-  - Progress updates via `scan_progress`.
-  - Download PNG or image-only PDF on completion.
+  - Start single-page scan through the proxy API.
+  - Progress updates via SSE (`scan_progress`).
+  - Download scanned outputs and PDF exports.
+
+- Photocopy:
+  - Trigger direct scan+print from the UI (`Photocopy` button).
+  - Tracks photocopy runs in print history.
 
 - History:
   - Persisted jobs/artifacts in SQLite.
@@ -30,8 +32,7 @@ Built with:
 Copy `.env.example` to `.env.local` as needed.
 
 Important defaults:
-- `CUPS_HOST=10.2.1.103`
-- `SANE_HOST=10.2.1.103`
+- `PROXY_API_URL=http://10.1.1.190:8000`
 - `DATA_DIR=/data`
 
 ## Local run
@@ -56,6 +57,10 @@ This mounts `./data` to `/data` in the container for DB, logs, uploads, and scan
 - `GET /api/health`
 - `GET /api/printers`
 - `GET /api/scanners`
+- `POST /api/copy`
+- `POST /api/scan` (scan helper endpoint)
+- `GET /api/scan/status`
+- `GET /api/scan/download/:filename`
 - `POST /api/print/jobs`
 - `GET /api/print/jobs/:jobId`
 - `POST /api/print/jobs/:jobId/cancel`
@@ -63,12 +68,12 @@ This mounts `./data` to `/data` in the container for DB, logs, uploads, and scan
 - `GET /api/scan/jobs/:jobId`
 - `POST /api/scan/jobs/:jobId/cancel`
 - `GET /api/scan/jobs/:jobId/events` (SSE)
-- `GET /api/scan/jobs/:jobId/download?format=png|pdf`
+- `GET /api/scan/jobs/:jobId/download?format=png|pdf|jpeg|tiff|pnm`
 - `GET /api/jobs?type=&status=&limit=&cursor=`
 
 ## Data storage
 
-- SQLite DB: `${DATA_DIR}/web-printer.sqlite` (default path, kept for compatibility)
+- SQLite DB: `${DATA_DIR}/web-printer.sqlite`
 - Uploads: `${DATA_DIR}/uploads`
 - Scans: `${DATA_DIR}/scans`
 - JSONL logs: `${DATA_DIR}/logs`

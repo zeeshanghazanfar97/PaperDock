@@ -103,6 +103,25 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
   return "secondary";
 }
 
+function scanFormatForArtifactKind(kind: string): "png" | "pdf" | "jpeg" | "tiff" | "pnm" | null {
+  if (kind === "scan_png") {
+    return "png";
+  }
+  if (kind === "scan_pdf") {
+    return "pdf";
+  }
+  if (kind === "scan_jpeg") {
+    return "jpeg";
+  }
+  if (kind === "scan_tiff") {
+    return "tiff";
+  }
+  if (kind === "scan_pnm") {
+    return "pnm";
+  }
+  return null;
+}
+
 function isPdfUpload(file: File | null) {
   if (!file) {
     return false;
@@ -219,6 +238,7 @@ export function Dashboard() {
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [draggingCrop, setDraggingCrop] = useState(false);
   const [editorBusy, setEditorBusy] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [historyType, setHistoryType] = useState<string>("all");
@@ -1140,6 +1160,37 @@ export function Dashboard() {
     void refreshJobs();
   }
 
+  async function onPhotoCopy() {
+    setCopying(true);
+
+    try {
+      const response = await fetch("/api/copy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          dpi: Number(scanDpi),
+          mode: scanMode,
+          printer: selectedPrinter || undefined,
+          copies
+        })
+      });
+
+      const json = await response.json();
+
+      if (!response.ok) {
+        toast.error(json.error ?? "Photocopy failed");
+        return;
+      }
+
+      toast.success(`Photocopy job ${json.job?.id?.slice?.(0, 8) ?? "submitted"}`);
+      void refreshJobs();
+    } finally {
+      setCopying(false);
+    }
+  }
+
   async function onCancelPrint(jobId: string) {
     const response = await fetch(`/api/print/jobs/${jobId}/cancel`, {
       method: "POST"
@@ -1494,6 +1545,9 @@ export function Dashboard() {
                   <Button variant="outline" onClick={onCancelScan} disabled={!activeScanJobId}>
                     Cancel Scan
                   </Button>
+                  <Button variant="secondary" onClick={onPhotoCopy} disabled={Boolean(activeScanJobId) || copying}>
+                    {copying ? "Photocopying..." : "Photocopy"}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1738,13 +1792,14 @@ export function Dashboard() {
                             );
                           }
 
-                          if (job.type === "scan" && (artifact.kind === "scan_png" || artifact.kind === "scan_pdf")) {
-                            const format = artifact.kind === "scan_png" ? "png" : "pdf";
+                          const scanFormat = job.type === "scan" ? scanFormatForArtifactKind(artifact.kind) : null;
+
+                          if (scanFormat) {
                             return (
                               <a
                                 key={artifact.id}
                                 className="inline-flex items-center rounded-md border bg-card/80 px-2 py-1 text-xs font-semibold hover:bg-accent"
-                                href={`/api/scan/jobs/${job.id}/download?format=${format}`}
+                                href={`/api/scan/jobs/${job.id}/download?format=${scanFormat}`}
                               >
                                 {artifact.kind} ({formatBytes(artifact.sizeBytes)})
                               </a>

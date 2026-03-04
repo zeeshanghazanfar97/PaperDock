@@ -1,6 +1,12 @@
 import { config } from "@/lib/server/config";
-import { runCommand } from "@/lib/server/commands";
 import { getCacheValue, setCacheValue } from "@/lib/server/job-store";
+import {
+  requestProxyCancelPrintJob,
+  requestProxyPrintJob,
+  requestProxyPrintJobs,
+  requestProxyPrinters,
+  type OptionValue
+} from "@/lib/server/scanner-proxy-client";
 
 export interface PrinterInfo {
   name: string;
@@ -8,36 +14,9 @@ export interface PrinterInfo {
   isDefault: boolean;
 }
 
-function parsePrinterList(output: string, defaultPrinter: string | null): PrinterInfo[] {
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("printer "))
-    .map((line) => {
-      const match = line.match(/^printer\s+(\S+)\s+is\s+(.+?)\.?$/);
-      if (!match) {
-        return null;
-      }
-
-      const name = match[1];
-      const state = match[2] ?? "unknown";
-
-      return {
-        name,
-        state,
-        isDefault: defaultPrinter === name
-      };
-    })
-    .filter((item): item is PrinterInfo => Boolean(item));
-}
-
-async function getDefaultPrinter() {
-  const response = await runCommand("lpstat", ["-h", config.CUPS_HOST, "-d"], {
-    timeoutMs: config.PRINT_TIMEOUT_MS
-  });
-
-  const match = response.stdout.match(/system default destination:\s*(\S+)/i);
-  return match?.[1] ?? null;
+function timeoutSecondsFromMs(ms: number) {
+  const seconds = Math.ceil(ms / 1000);
+  return Math.max(5, Math.min(3600, seconds));
 }
 
 export async function discoverPrinters(): Promise<PrinterInfo[]> {
@@ -47,12 +26,13 @@ export async function discoverPrinters(): Promise<PrinterInfo[]> {
     return cached.value;
   }
 
-  const [defaultPrinter, printersResp] = await Promise.all([
-    getDefaultPrinter(),
-    runCommand("lpstat", ["-h", config.CUPS_HOST, "-p"], { timeoutMs: config.PRINT_TIMEOUT_MS })
-  ]);
+  const response = await requestProxyPrinters();
+  const printers = response.printers.map((printer) => ({
+    name: printer.name,
+    state: printer.state,
+    isDefault: printer.isDefault
+  }));
 
-  const printers = parsePrinterList(printersResp.stdout, defaultPrinter);
   setCacheValue("printers", printers);
   return printers;
 }
@@ -67,63 +47,45 @@ export async function submitPrintToCups(params: {
   orientation?: "auto" | "portrait" | "landscape";
   sides?: "one-sided" | "two-sided-long-edge" | "two-sided-short-edge";
 }) {
-  const args = ["-h", config.CUPS_HOST, "-d", params.printer, "-n", String(params.copies)];
+  const options: Record<string, OptionValue> = {};
 
   if (params.media) {
-    args.push("-o", `media=${params.media}`);
-  }
-
-  if (params.pageRanges) {
-    args.push("-o", `page-ranges=${params.pageRanges}`);
+    options.media = params.media;
   }
 
   if (params.printScaling && params.printScaling !== "auto") {
-    args.push("-o", `print-scaling=${params.printScaling}`);
+    options["print-scaling"] = params.printScaling;
   }
 
   if (params.orientation === "portrait") {
-    args.push("-o", "orientation-requested=3");
+    options["orientation-requested"] = 3;
   } else if (params.orientation === "landscape") {
-    args.push("-o", "orientation-requested=4");
+    options["orientation-requested"] = 4;
   }
 
   if (params.sides) {
-    args.push("-o", `sides=${params.sides}`);
+    options.sides = params.sides;
   }
 
-  args.push(params.filePath);
-
-  const response = await runCommand("lp", args, {
-    timeoutMs: config.PRINT_TIMEOUT_MS
+  const result = await requestProxyPrintJob({
+    file_path: params.filePath,
+    printer: params.printer,
+    copies: params.copies,
+    page_ranges: params.pageRanges ?? null,
+    options,
+    timeout_seconds: timeoutSecondsFromMs(config.PRINT_TIMEOUT_MS)
   });
 
-  const match = response.stdout.match(/request id is\s+(\S+)/i);
-  if (!match) {
-    throw new Error(`Unable to parse CUPS request id. Output: ${response.stdout || response.stderr}`);
-  }
-
   return {
-    cupsJobId: match[1]
+    cupsJobId: result.job_id
   };
 }
 
 export async function listActiveCupsJobs() {
-  const response = await runCommand("lpstat", ["-h", config.CUPS_HOST, "-W", "all", "-o"], {
-    timeoutMs: config.PRINT_TIMEOUT_MS
-  });
-
-  const ids = response.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split(/\s+/)[0])
-    .filter((value): value is string => Boolean(value));
-
-  return new Set(ids);
+  const response = await requestProxyPrintJobs();
+  return response.ids;
 }
 
 export async function cancelCupsJob(cupsJobId: string) {
-  await runCommand("cancel", ["-h", config.CUPS_HOST, cupsJobId], {
-    timeoutMs: config.PRINT_TIMEOUT_MS
-  });
+  await requestProxyCancelPrintJob(cupsJobId);
 }

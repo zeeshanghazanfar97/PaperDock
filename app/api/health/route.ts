@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 
 import { sqlite } from "@/lib/server/db";
 import { bootstrapServer } from "@/lib/server/bootstrap";
-import { runCommand } from "@/lib/server/commands";
+import {
+  ScannerProxyError,
+  requestProxyHealth,
+  requestProxyPrinters,
+  requestProxyScanDevices
+} from "@/lib/server/scanner-proxy-client";
+import { config } from "@/lib/server/config";
 
 export const runtime = "nodejs";
 
@@ -12,25 +18,29 @@ export async function GET() {
   try {
     sqlite.prepare("SELECT 1 as ok").get();
 
-    const [lpResult, scanResult] = await Promise.all([
-      runCommand("which", ["lpstat"]),
-      runCommand("which", ["scanimage"])
+    const [proxyHealth, printers, scanners] = await Promise.all([
+      requestProxyHealth(),
+      requestProxyPrinters(),
+      requestProxyScanDevices()
     ]);
 
     return NextResponse.json({
       ok: true,
       dependencies: {
-        lpstat: lpResult.stdout.trim(),
-        scanimage: scanResult.stdout.trim()
+        proxyApiUrl: config.PROXY_API_URL,
+        proxyStatus: proxyHealth.status,
+        printers: printers.printers.length,
+        scanners: scanners.length
       }
     });
   } catch (error) {
+    const statusCode = error instanceof ScannerProxyError ? 502 : 500;
     return NextResponse.json(
       {
         ok: false,
         error: error instanceof Error ? error.message : String(error)
       },
-      { status: 500 }
+      { status: statusCode }
     );
   }
 }

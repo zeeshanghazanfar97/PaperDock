@@ -13,6 +13,7 @@ import { addArtifact, createJob, getJob } from "@/lib/server/job-store";
 import { dataPaths, safeFileName } from "@/lib/server/paths";
 import { startPrintJob } from "@/lib/server/print-manager";
 import { discoverPrinters } from "@/lib/server/printer";
+import { ScannerProxyError } from "@/lib/server/scanner-proxy-client";
 
 export const runtime = "nodejs";
 
@@ -85,7 +86,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsedFields.error.flatten() }, { status: 400 });
   }
 
-  const printers = await discoverPrinters();
+  let printers: Awaited<ReturnType<typeof discoverPrinters>>;
+  try {
+    printers = await discoverPrinters();
+  } catch (error) {
+    const statusCode = error instanceof ScannerProxyError ? 502 : 500;
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : String(error)
+      },
+      { status: statusCode }
+    );
+  }
   if (!printers.length) {
     return NextResponse.json({ error: "No printers available" }, { status: 503 });
   }

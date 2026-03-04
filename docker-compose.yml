@@ -9,8 +9,7 @@ services:
     #   - "10343:3000"
     environment:
       NODE_ENV: production
-      CUPS_HOST: 10.2.1.103
-      SANE_HOST: 10.2.1.103
+      PROXY_API_URL: http://10.1.1.190:8000
       DATA_DIR: /data
       RETENTION_DAYS: 30
     volumes:

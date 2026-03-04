@@ -18,7 +18,7 @@ async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function watchPrintCompletion(jobId: string, cupsJobId: string) {
+async function watchPrintCompletion(jobId: string, printJobId: string) {
   const started = Date.now();
 
   while (Date.now() - started < config.PRINT_WATCH_TIMEOUT_MS) {
@@ -32,13 +32,13 @@ async function watchPrintCompletion(jobId: string, cupsJobId: string) {
     }
 
     const activeJobs = await listActiveCupsJobs();
-    if (!activeJobs.has(cupsJobId)) {
+    if (!activeJobs.has(printJobId)) {
       updateJobStatus({ jobId, status: "completed" });
       appendJobEvent({
         jobId,
         eventType: "print_completed",
         payload: {
-          cupsJobId
+          printJobId
         }
       });
       return;
@@ -50,16 +50,35 @@ async function watchPrintCompletion(jobId: string, cupsJobId: string) {
   updateJobStatus({
     jobId,
     status: "failed",
-    errorMessage: `Timed out waiting for CUPS job ${cupsJobId} to finish`
+    errorMessage: `Timed out waiting for print job ${printJobId} to finish`
   });
 
   appendJobEvent({
     jobId,
     eventType: "print_timeout",
     payload: {
-      cupsJobId,
+      printJobId,
       timeoutMs: config.PRINT_WATCH_TIMEOUT_MS
     }
+  });
+}
+
+export function trackSubmittedPrintJob(jobId: string, printJobId: string) {
+  void watchPrintCompletion(jobId, printJobId).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    updateJobStatus({
+      jobId,
+      status: "failed",
+      errorMessage: message
+    });
+
+    appendJobEvent({
+      jobId,
+      eventType: "print_watch_failed",
+      payload: { error: message }
+    });
+
+    logError("print watcher failed", { jobId, error: message });
   });
 }
 
@@ -104,11 +123,40 @@ export async function startPrintJob(jobId: string, options: PrintOptions) {
       sides: options.sides
     });
 
+    const printJobId = submitted.cupsJobId ?? null;
+
+    if (printJobId) {
+      updateJobStatus({
+        jobId,
+        status: "submitted",
+        metaPatch: {
+          printJobId
+        }
+      });
+
+      appendJobEvent({
+        jobId,
+        eventType: "print_submitted",
+        payload: {
+          printJobId
+        }
+      });
+
+      logInfo("print submitted", {
+        jobId,
+        printer: options.printer,
+        printJobId
+      });
+
+      trackSubmittedPrintJob(jobId, printJobId);
+      return;
+    }
+
     updateJobStatus({
       jobId,
-      status: "submitted",
+      status: "completed",
       metaPatch: {
-        cupsJobId: submitted.cupsJobId
+        printJobId: null
       }
     });
 
@@ -116,31 +164,14 @@ export async function startPrintJob(jobId: string, options: PrintOptions) {
       jobId,
       eventType: "print_submitted",
       payload: {
-        cupsJobId: submitted.cupsJobId
+        printJobId: null,
+        untracked: true
       }
     });
 
-    logInfo("print submitted", {
+    logInfo("print completed without queue tracking", {
       jobId,
-      printer: options.printer,
-      cupsJobId: submitted.cupsJobId
-    });
-
-    void watchPrintCompletion(jobId, submitted.cupsJobId).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      updateJobStatus({
-        jobId,
-        status: "failed",
-        errorMessage: message
-      });
-
-      appendJobEvent({
-        jobId,
-        eventType: "print_watch_failed",
-        payload: { error: message }
-      });
-
-      logError("print watcher failed", { jobId, error: message });
+      printer: options.printer
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -173,13 +204,18 @@ export async function cancelPrintJob(jobId: string) {
     throw new Error("Job not found");
   }
 
-  const cupsJobId = typeof job.meta.cupsJobId === "string" ? job.meta.cupsJobId : null;
+  const printJobId =
+    typeof job.meta.printJobId === "string"
+      ? job.meta.printJobId
+      : typeof job.meta.cupsJobId === "string"
+        ? job.meta.cupsJobId
+        : null;
 
-  if (!cupsJobId) {
-    throw new Error("CUPS job id missing, cannot cancel");
+  if (!printJobId) {
+    throw new Error("Print job id missing, cannot cancel");
   }
 
-  await cancelCupsJob(cupsJobId);
+  await cancelCupsJob(printJobId);
 
   updateJobStatus({
     jobId,
@@ -191,7 +227,7 @@ export async function cancelPrintJob(jobId: string) {
     jobId,
     eventType: "print_canceled",
     payload: {
-      cupsJobId
+      printJobId
     }
   });
 }

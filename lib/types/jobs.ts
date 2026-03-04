@@ -23,7 +23,7 @@ export interface JobRecord {
 export interface ArtifactRecord {
   id: string;
   jobId: string;
-  kind: "upload" | "scan_png" | "scan_pdf";
+  kind: "upload" | "scan_png" | "scan_pdf" | "scan_jpeg" | "scan_tiff" | "scan_pnm";
   path: string;
   mime: string;
   sizeBytes: number;

@@ -6,7 +6,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PaperDock",
-  description: "A self-hosted print and scan desk for CUPS and SANE workflows."
+  description: "A self-hosted print, scan, and photocopy desk powered by a proxy API."
 };
 
 const themeInitScript = `
