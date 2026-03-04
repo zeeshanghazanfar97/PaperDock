@@ -2,7 +2,7 @@
 
 import { type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { Crop, Download, FileText, ImageIcon, MoonStar, RefreshCw, RotateCcw, RotateCw, ScanLine, SendHorizontal, Sun, UploadCloud, X } from "lucide-react";
+import { Crop, Download, FileText, ImageIcon, LogOut, MoonStar, RefreshCw, RotateCcw, RotateCw, ScanLine, SendHorizontal, Sun, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -440,11 +440,30 @@ export function Dashboard() {
     writeScannerCache(nextScanners, validId);
   }
 
+  function redirectToLogin() {
+    const returnTo = `${window.location.pathname}${window.location.search}`;
+    const loginUrl = returnTo === "/" ? "/login" : `/login?returnTo=${encodeURIComponent(returnTo)}`;
+    window.location.href = loginUrl;
+  }
+
+  async function fetchJsonOrRedirect<T extends Record<string, unknown>>(input: RequestInfo | URL, init?: RequestInit) {
+    const response = await fetch(input, init);
+    const json = (await response.json().catch(() => ({}))) as T;
+
+    if (response.status === 401) {
+      redirectToLogin();
+      throw new Error("Authentication required");
+    }
+
+    return { response, json };
+  }
+
   async function refreshScannersCache(options: { showSuccessToast?: boolean } = {}) {
     try {
       setRefreshingScanners(true);
-      const response = await fetch("/api/scanners", { cache: "no-store" });
-      const json = await response.json();
+      const { response, json } = await fetchJsonOrRedirect<{ scanners?: ScannerInfo[]; error?: string }>("/api/scanners", {
+        cache: "no-store"
+      });
 
       if (!response.ok) {
         throw new Error(json.error ?? "Failed to fetch scanners");
@@ -539,12 +558,25 @@ export function Dashboard() {
           applyScanners(scannerCache.scanners, scannerCache.selectedScannerId);
         }
 
-        const [printersResp, jobsResp] = await Promise.all([
-          fetch("/api/printers", { cache: "no-store" }),
-          fetch("/api/jobs?limit=30", { cache: "no-store" })
+        const [printersResult, jobsResult] = await Promise.all([
+          fetchJsonOrRedirect<{ printers?: PrinterInfo[]; defaultPrinter?: string | null; error?: string }>("/api/printers", {
+            cache: "no-store"
+          }),
+          fetchJsonOrRedirect<{ items?: Job[]; error?: string }>("/api/jobs?limit=30", { cache: "no-store" })
         ]);
 
-        const [printersJson, jobsJson] = await Promise.all([printersResp.json(), jobsResp.json()]);
+        const printersResp = printersResult.response;
+        const jobsResp = jobsResult.response;
+        const printersJson = printersResult.json;
+        const jobsJson = jobsResult.json;
+
+        if (!printersResp.ok) {
+          throw new Error(printersJson.error ?? "Failed to fetch printers");
+        }
+
+        if (!jobsResp.ok) {
+          throw new Error(jobsJson.error ?? "Failed to fetch jobs");
+        }
 
         if (cancelled) {
           return;
@@ -626,9 +658,19 @@ export function Dashboard() {
   async function refreshJobs() {
     try {
       setRefreshing(true);
-      const response = await fetch("/api/jobs?limit=40", { cache: "no-store" });
-      const json = await response.json();
+      const { response, json } = await fetchJsonOrRedirect<{ items?: Job[]; error?: string }>("/api/jobs?limit=40", {
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error(json.error ?? "Failed to refresh jobs");
+      }
+
       setJobs(json.items ?? []);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "Authentication required") {
+        toast.error(error instanceof Error ? error.message : "Failed to refresh jobs");
+      }
     } finally {
       setRefreshing(false);
     }
@@ -1187,12 +1229,10 @@ export function Dashboard() {
     body.set("orientation", printOrientation);
     body.set("sides", printSides);
 
-    const response = await fetch("/api/print/jobs", {
+    const { response, json } = await fetchJsonOrRedirect<{ error?: string; job?: { id?: string } }>("/api/print/jobs", {
       method: "POST",
       body
     });
-
-    const json = await response.json();
 
     if (!response.ok) {
       toast.error(json.error ?? "Print request failed");
@@ -1219,7 +1259,7 @@ export function Dashboard() {
     drawEditorCanvas(null, 0);
     setLastScanDpi(Number(scanDpi) || 150);
 
-    const response = await fetch("/api/scan/jobs", {
+    const { response, json } = await fetchJsonOrRedirect<{ error?: string; job?: { id?: string } }>("/api/scan/jobs", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -1230,8 +1270,6 @@ export function Dashboard() {
         device: selectedScannerId || undefined
       })
     });
-
-    const json = await response.json();
 
     if (!response.ok) {
       toast.error(json.error ?? "Failed to start scan");
@@ -1251,11 +1289,9 @@ export function Dashboard() {
       return;
     }
 
-    const response = await fetch(`/api/scan/jobs/${activeScanJobId}/cancel`, {
+    const { response, json } = await fetchJsonOrRedirect<{ error?: string }>(`/api/scan/jobs/${activeScanJobId}/cancel`, {
       method: "POST"
     });
-
-    const json = await response.json();
 
     if (!response.ok) {
       toast.error(json.error ?? "Cancel failed");
@@ -1272,7 +1308,7 @@ export function Dashboard() {
     setCopying(true);
 
     try {
-      const response = await fetch("/api/copy", {
+      const { response, json } = await fetchJsonOrRedirect<{ error?: string; job?: { id?: string } }>("/api/copy", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -1285,8 +1321,6 @@ export function Dashboard() {
           copies
         })
       });
-
-      const json = await response.json();
 
       if (!response.ok) {
         toast.error(json.error ?? "Photocopy failed");
@@ -1301,11 +1335,9 @@ export function Dashboard() {
   }
 
   async function onCancelPrint(jobId: string) {
-    const response = await fetch(`/api/print/jobs/${jobId}/cancel`, {
+    const { response, json } = await fetchJsonOrRedirect<{ error?: string }>(`/api/print/jobs/${jobId}/cancel`, {
       method: "POST"
     });
-
-    const json = await response.json();
 
     if (!response.ok) {
       toast.error(json.error ?? "Print cancel failed");
@@ -1325,6 +1357,10 @@ export function Dashboard() {
     window.localStorage.setItem("theme", nextTheme);
   }
 
+  function onLogout() {
+    window.location.href = "/api/auth/logout";
+  }
+
   return (
     <main className="container py-8 md:py-12">
       <section className="panel-enter mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1335,10 +1371,16 @@ export function Dashboard() {
             files from one place.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={toggleTheme} className="sm:mt-1">
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
-          {theme === "dark" ? "Light Mode" : "Dark Mode"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 sm:mt-1">
+          <Button variant="outline" size="sm" onClick={toggleTheme}>
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}
+            {theme === "dark" ? "Light Mode" : "Dark Mode"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onLogout}>
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
+        </div>
       </section>
 
       <Tabs defaultValue="print" className="panel-enter-delayed">
