@@ -21,4 +21,4 @@ ENV PORT=3000
 EXPOSE 3000
 
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
-CMD ["npm", "run", "start"]
+CMD ["node", ".next/standalone/server.js"]
