@@ -6,6 +6,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   CUPS_HOST: z.string().default("10.2.1.103"),
   SANE_HOST: z.string().default("10.2.1.103"),
+  SCANNER_PROXY_URL: z.string().trim().optional(),
+  SCANNER_PROXY_TOKEN: z.string().trim().optional(),
+  SCANNER_PROXY_TIMEOUT_MS: z.coerce.number().int().positive().default(8 * 60 * 1000),
   DATA_DIR: z.string().optional(),
   DB_PATH: z.string().optional(),
   MAX_UPLOAD_MB: z.coerce.number().int().positive().default(20),
@@ -27,9 +30,12 @@ if (!parsed.success) {
 
 const env = parsed.data;
 const dataDir = env.DATA_DIR ?? path.join(process.cwd(), "data");
+const scannerProxyUrl = env.SCANNER_PROXY_URL?.trim();
 
 export const config = {
   ...env,
   DATA_DIR: dataDir,
+  SCANNER_PROXY_URL: scannerProxyUrl ? scannerProxyUrl.replace(/\/+$/, "") : undefined,
+  SCANNER_PROXY_TOKEN: env.SCANNER_PROXY_TOKEN ? env.SCANNER_PROXY_TOKEN.trim() : undefined,
   dbPath: env.DB_PATH ?? path.join(dataDir, "web-printer.sqlite")
 };

@@ -11,6 +11,8 @@ services:
       NODE_ENV: production
       CUPS_HOST: 10.2.1.103
       SANE_HOST: 10.2.1.103
+      SCANNER_PROXY_URL: ${SCANNER_PROXY_URL:-}
+      SCANNER_PROXY_TOKEN: ${SCANNER_PROXY_TOKEN:-}
       DATA_DIR: /data
       RETENTION_DAYS: 30
     volumes:

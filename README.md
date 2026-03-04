@@ -4,7 +4,7 @@ PaperDock is a self-hosted print and scan desk that gives your browser a clean, 
 
 Built with:
 - CUPS CLI (`lp`, `lpstat`, `cancel`) for print jobs.
-- SANE `scanimage` for single-page scans.
+- SANE `scanimage` for single-page scans (local or via scanner proxy).
 - Next.js + shadcn/ui frontend.
 - SQLite + JSONL audit logs for history.
 
@@ -20,6 +20,7 @@ Built with:
   - Live line-by-line canvas updates via SSE (`scan_rows`).
   - Progress updates via `scan_progress`.
   - Download PNG or image-only PDF on completion.
+  - Supports direct scanner access or remote LAN scanner proxy.
 
 - History:
   - Persisted jobs/artifacts in SQLite.
@@ -33,6 +34,21 @@ Important defaults:
 - `CUPS_HOST=10.2.1.103`
 - `SANE_HOST=10.2.1.103`
 - `DATA_DIR=/data`
+- `SCANNER_PROXY_URL=` (empty means local `scanimage`)
+
+## Scanner proxy (recommended for Docker + LAN scanners)
+
+If scanner discovery/execution inside Docker is unreliable, run the dedicated proxy on a Debian host with native scanner access and point PaperDock to it.
+
+- Proxy service lives in [`proxy/README.md`](proxy/README.md)
+- Set in PaperDock environment:
+  - `SCANNER_PROXY_URL=http://<debian-host-ip>:3412`
+  - `SCANNER_PROXY_TOKEN=<token>` (if proxy auth enabled)
+
+When `SCANNER_PROXY_URL` is set:
+- `/api/scanners` uses proxy scanner discovery
+- scan jobs run through proxy streaming + result download
+- print flows remain unchanged
 
 ## Local run
 
@@ -50,6 +66,11 @@ docker compose up --build -d
 ```
 
 This mounts `./data` to `/data` in the container for DB, logs, uploads, and scans.
+
+To use proxy mode in Docker, also provide:
+
+- `SCANNER_PROXY_URL`
+- `SCANNER_PROXY_TOKEN` (optional)
 
 ## API endpoints
 

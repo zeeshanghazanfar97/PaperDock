@@ -13,17 +13,20 @@ import { logError, logInfo } from "@/lib/server/logger";
 import { dataPaths, safeFileName } from "@/lib/server/paths";
 import { PnmStreamParser } from "@/lib/server/pnm-parser";
 import { discoverScanners } from "@/lib/server/scanner";
+import { isScannerProxyEnabled, readResponseJson, scannerProxyFetch } from "@/lib/server/scanner-proxy";
 import { scanEventHub } from "@/lib/server/scan-events";
 import type { SseJobEvent } from "@/lib/types/jobs";
 
 interface ScanOptions {
   dpi: number;
   mode: "Color" | "Gray";
+  scannerDeviceId?: string;
 }
 
 interface ScanRuntimeState {
   activeJobId: string | null;
   processes: Map<string, ReturnType<typeof spawnCommand>>;
+  proxyAbortControllers: Map<string, AbortController>;
   canceledJobs: Set<string>;
 }
 
@@ -37,6 +40,7 @@ const runtimeState =
   ({
     activeJobId: null,
     processes: new Map<string, ReturnType<typeof spawnCommand>>(),
+    proxyAbortControllers: new Map<string, AbortController>(),
     canceledJobs: new Set<string>()
   } satisfies ScanRuntimeState);
 
@@ -115,6 +119,375 @@ function createScanProcess(deviceId: string, options: ScanOptions) {
   return spawnCommand("scanimage", args);
 }
 
+function asFiniteNumber(value: unknown, fallback: number) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    return fallback;
+  }
+  return numberValue;
+}
+
+interface ProxyScanHeaderPayload {
+  width: number;
+  height: number;
+  channels: number;
+}
+
+interface ProxyScanCompletionPayload {
+  sessionId: string;
+  width?: number;
+  height?: number;
+  channels?: number;
+  partial?: boolean;
+  expectedRows?: number;
+  actualRows?: number;
+  scannerExitCode?: number | null;
+}
+
+function markScanCanceled(jobId: string) {
+  updateJobStatus({
+    jobId,
+    status: "canceled",
+    errorMessage: "Scan canceled by user"
+  });
+
+  appendJobEvent({
+    jobId,
+    eventType: "scan_canceled"
+  });
+
+  publish(jobId, {
+    type: "scan_error",
+    payload: { message: "Scan canceled" }
+  });
+}
+
+async function downloadProxyResult(params: {
+  sessionId: string;
+  format: "png" | "pdf";
+  signal: AbortSignal;
+}) {
+  const response = await scannerProxyFetch(`/scan/results/${encodeURIComponent(params.sessionId)}?format=${params.format}`, {
+    method: "GET",
+    headers: {
+      Accept: params.format === "png" ? "image/png" : "application/pdf"
+    },
+    signal: params.signal,
+    timeoutMs: config.SCAN_TIMEOUT_MS + 30_000
+  });
+
+  if (!response.ok) {
+    const payload = await readResponseJson(response);
+    const message =
+      typeof payload.error === "string"
+        ? payload.error
+        : `scanner proxy result download failed with status ${response.status}`;
+    throw new Error(message);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(new Uint8Array(arrayBuffer));
+}
+
+async function startScanJobViaProxy(
+  jobId: string,
+  options: ScanOptions,
+  device: {
+    deviceId: string;
+    description: string;
+  }
+) {
+  const abortController = new AbortController();
+  runtimeState.proxyAbortControllers.set(jobId, abortController);
+
+  try {
+    const response = await scannerProxyFetch("/scan/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/x-ndjson"
+      },
+      body: JSON.stringify({
+        dpi: options.dpi,
+        mode: options.mode,
+        scannerDeviceId: device.deviceId,
+        rowChunk: config.SCAN_ROW_CHUNK,
+        previewMaxWidth: config.SCAN_PREVIEW_MAX_WIDTH,
+        previewMaxHeight: config.SCAN_PREVIEW_MAX_HEIGHT
+      }),
+      signal: abortController.signal,
+      timeoutMs: config.SCAN_TIMEOUT_MS + 30_000
+    });
+
+    if (!response.ok) {
+      const payload = await readResponseJson(response);
+      const message =
+        typeof payload.error === "string"
+          ? payload.error
+          : `scanner proxy scan request failed with status ${response.status}`;
+      throw new Error(message);
+    }
+
+    if (!response.body) {
+      throw new Error("Scanner proxy did not return a streaming body");
+    }
+
+    let headerPayload: ProxyScanHeaderPayload | null = null;
+    let completionPayload: ProxyScanCompletionPayload | null = null;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const handleLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      let parsed: { type?: string; payload?: Record<string, unknown> };
+      try {
+        parsed = JSON.parse(trimmed) as { type?: string; payload?: Record<string, unknown> };
+      } catch {
+        return;
+      }
+
+      const payload = parsed.payload ?? {};
+
+      if (parsed.type === "scan_header") {
+        const width = asFiniteNumber(payload.width, 0);
+        const height = asFiniteNumber(payload.height, 0);
+        const channels = asFiniteNumber(payload.channels, 0);
+        headerPayload = {
+          width,
+          height,
+          channels
+        };
+
+        publish(jobId, {
+          type: "scan_header",
+          payload: {
+            width,
+            height,
+            channels,
+            dpi: asFiniteNumber(payload.dpi, options.dpi),
+            mode: (payload.mode === "Gray" ? "Gray" : "Color") as "Color" | "Gray",
+            previewWidth: asFiniteNumber(payload.previewWidth, width),
+            previewHeight: asFiniteNumber(payload.previewHeight, height),
+            previewRowStride: asFiniteNumber(payload.previewRowStride, 1),
+            previewColStride: asFiniteNumber(payload.previewColStride, 1)
+          }
+        });
+
+        appendJobEvent({
+          jobId,
+          eventType: "scan_header",
+          payload: {
+            width,
+            height,
+            channels,
+            dpi: asFiniteNumber(payload.dpi, options.dpi),
+            mode: payload.mode === "Gray" ? "Gray" : "Color"
+          }
+        });
+        return;
+      }
+
+      if (parsed.type === "scan_rows") {
+        publish(jobId, {
+          type: "scan_rows",
+          payload: {
+            startRow: asFiniteNumber(payload.startRow, 0),
+            rowCount: asFiniteNumber(payload.rowCount, 0),
+            channels: asFiniteNumber(payload.channels, 3),
+            width: asFiniteNumber(payload.width, headerPayload?.width ?? 0),
+            dataBase64: typeof payload.dataBase64 === "string" ? payload.dataBase64 : ""
+          }
+        });
+        return;
+      }
+
+      if (parsed.type === "scan_progress") {
+        publish(jobId, {
+          type: "scan_progress",
+          payload: {
+            percent: asFiniteNumber(payload.percent, 0)
+          }
+        });
+        return;
+      }
+
+      if (parsed.type === "scan_complete") {
+        if (typeof payload.sessionId !== "string" || !payload.sessionId) {
+          throw new Error("Scanner proxy did not provide a valid scan result session id");
+        }
+
+        completionPayload = {
+          sessionId: payload.sessionId,
+          width: asFiniteNumber(payload.width, headerPayload?.width ?? 0),
+          height: asFiniteNumber(payload.height, headerPayload?.height ?? 0),
+          channels: asFiniteNumber(payload.channels, headerPayload?.channels ?? 3),
+          partial: Boolean(payload.partial),
+          expectedRows: asFiniteNumber(payload.expectedRows, headerPayload?.height ?? 0),
+          actualRows: asFiniteNumber(payload.actualRows, asFiniteNumber(payload.height, headerPayload?.height ?? 0)),
+          scannerExitCode:
+            typeof payload.scannerExitCode === "number" || payload.scannerExitCode === null
+              ? (payload.scannerExitCode as number | null)
+              : null
+        };
+        return;
+      }
+
+      if (parsed.type === "scan_error") {
+        const message = typeof payload.message === "string" ? payload.message : "Scanner proxy scan failed";
+        throw new Error(message);
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        handleLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+
+    const tail = buffer + decoder.decode();
+    if (tail.trim()) {
+      handleLine(tail);
+    }
+
+    if (runtimeState.canceledJobs.has(jobId)) {
+      markScanCanceled(jobId);
+      return;
+    }
+
+    if (!completionPayload) {
+      throw new Error("Scanner proxy scan stream ended without completion event");
+    }
+    const completion = (completionPayload ?? {}) as ProxyScanCompletionPayload;
+    const header = (headerPayload ?? {
+      width: 0,
+      height: 0,
+      channels: 3
+    }) as ProxyScanHeaderPayload;
+
+    const [remotePng, remotePdf] = await Promise.all([
+      downloadProxyResult({
+        sessionId: completion.sessionId,
+        format: "png",
+        signal: abortController.signal
+      }),
+      downloadProxyResult({
+        sessionId: completion.sessionId,
+        format: "pdf",
+        signal: abortController.signal
+      })
+    ]);
+
+    if (runtimeState.canceledJobs.has(jobId)) {
+      markScanCanceled(jobId);
+      return;
+    }
+
+    const baseName = safeFileName(`${jobId}-${crypto.randomUUID()}`);
+    const pngPath = path.join(dataPaths.scans, `${baseName}.png`);
+    const pdfPath = path.join(dataPaths.scans, `${baseName}.pdf`);
+
+    fs.writeFileSync(pngPath, remotePng);
+    fs.writeFileSync(pdfPath, remotePdf);
+
+    addArtifact({
+      jobId,
+      kind: "scan_png",
+      path: pngPath,
+      mime: "image/png",
+      sizeBytes: fs.statSync(pngPath).size,
+      sha256: sha256File(pngPath)
+    });
+
+    addArtifact({
+      jobId,
+      kind: "scan_pdf",
+      path: pdfPath,
+      mime: "application/pdf",
+      sizeBytes: fs.statSync(pdfPath).size,
+      sha256: sha256File(pdfPath)
+    });
+
+    const output = {
+      pngUrl: `/api/scan/jobs/${jobId}/download?format=png`,
+      pdfUrl: `/api/scan/jobs/${jobId}/download?format=pdf`,
+      partial: Boolean(completion.partial),
+      expectedRows: asFiniteNumber(completion.expectedRows, asFiniteNumber(completion.height, header.height)),
+      actualRows: asFiniteNumber(completion.actualRows, asFiniteNumber(completion.height, header.height))
+    };
+
+    publish(jobId, {
+      type: "scan_progress",
+      payload: { percent: 100 }
+    });
+
+    publish(jobId, {
+      type: "scan_complete",
+      payload: output
+    });
+
+    updateJobStatus({
+      jobId,
+      status: "completed",
+      metaPatch: {
+        width: asFiniteNumber(completion.width, header.width),
+        height: asFiniteNumber(completion.height, header.height || output.actualRows),
+        expectedHeight: output.expectedRows,
+        channels: asFiniteNumber(completion.channels, header.channels),
+        dpi: options.dpi,
+        mode: options.mode,
+        scannerExitCode: completion.scannerExitCode ?? null,
+        partialScan: Boolean(completion.partial),
+        proxySessionId: completion.sessionId,
+        output
+      }
+    });
+
+    appendJobEvent({
+      jobId,
+      eventType: "scan_completed",
+      payload: {
+        ...output,
+        rows: output.actualRows,
+        proxySessionId: completion.sessionId
+      }
+    });
+
+    logInfo("scan completed via proxy", {
+      jobId,
+      proxySessionId: completion.sessionId,
+      dpi: options.dpi,
+      mode: options.mode,
+      width: asFiniteNumber(completion.width, header.width),
+      height: asFiniteNumber(completion.height, header.height || output.actualRows),
+      partialScan: Boolean(completion.partial)
+    });
+  } catch (error) {
+    if (runtimeState.canceledJobs.has(jobId)) {
+      markScanCanceled(jobId);
+      return;
+    }
+
+    throw error;
+  }
+}
+
 export function isScanRunning() {
   return runtimeState.activeJobId !== null;
 }
@@ -139,7 +512,8 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
     eventType: "scan_started",
     payload: {
       dpi: options.dpi,
-      mode: options.mode
+      mode: options.mode,
+      scannerDeviceId: options.scannerDeviceId ?? null
     }
   });
 
@@ -149,7 +523,14 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
       throw new Error("No scanner devices discovered by scanimage -L");
     }
 
-    const device = scanners[0];
+    const requestedScannerId = options.scannerDeviceId?.trim();
+    const device = requestedScannerId
+      ? scanners.find((scanner) => scanner.deviceId === requestedScannerId)
+      : scanners[0];
+
+    if (!device) {
+      throw new Error("Selected scanner is not available. Refresh scanners and try again.");
+    }
 
     updateJobStatus({
       jobId,
@@ -159,6 +540,11 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
         scannerDescription: device.description
       }
     });
+
+    if (isScannerProxyEnabled()) {
+      await startScanJobViaProxy(jobId, options, device);
+      return;
+    }
 
     const child = createScanProcess(device.deviceId, options);
     runtimeState.processes.set(jobId, child);
@@ -318,22 +704,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
     const { exitCode, stderr } = await processResult;
 
     if (runtimeState.canceledJobs.has(jobId)) {
-      updateJobStatus({
-        jobId,
-        status: "canceled",
-        errorMessage: "Scan canceled by user"
-      });
-
-      appendJobEvent({
-        jobId,
-        eventType: "scan_canceled"
-      });
-
-      publish(jobId, {
-        type: "scan_error",
-        payload: { message: "Scan canceled" }
-      });
-
+      markScanCanceled(jobId);
       return;
     }
 
@@ -533,6 +904,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
     logError("scan failed", { jobId, error: message });
   } finally {
     runtimeState.processes.delete(jobId);
+    runtimeState.proxyAbortControllers.delete(jobId);
     runtimeState.canceledJobs.delete(jobId);
     runtimeState.activeJobId = null;
 
@@ -543,6 +915,13 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
 }
 
 export function cancelScanJob(jobId: string) {
+  const proxyAbortController = runtimeState.proxyAbortControllers.get(jobId);
+  if (proxyAbortController) {
+    runtimeState.canceledJobs.add(jobId);
+    proxyAbortController.abort();
+    return true;
+  }
+
   const processRef = runtimeState.processes.get(jobId);
   if (!processRef) {
     return false;
