@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createSessionToken, readTransactionToken } from "@/lib/auth/session";
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
-import { isSecureRequest } from "@/lib/server/auth/http";
+import { getExternalOrigin, isSecureRequest } from "@/lib/server/auth/http";
 import { exchangeAuthorizationCode, resolveRedirectUri, verifyIdToken } from "@/lib/server/auth/oidc";
 import { getAuthSettings } from "@/lib/server/auth/settings";
 
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
     );
 
     const returnTo = sanitizeReturnTo(transaction.returnTo);
-    const response = NextResponse.redirect(new URL(returnTo, request.url));
+    const response = NextResponse.redirect(new URL(returnTo, getExternalOrigin(request)));
     response.cookies.set(settings.sessionCookieName, sessionToken, {
       httpOnly: true,
       secure: isSecureRequest(request),

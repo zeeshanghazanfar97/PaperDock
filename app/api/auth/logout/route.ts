@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
-import { isSecureRequest } from "@/lib/server/auth/http";
+import { getExternalOrigin, isSecureRequest } from "@/lib/server/auth/http";
 import { resolveEndSessionUrl } from "@/lib/server/auth/oidc";
 import { getAuthSettings } from "@/lib/server/auth/settings";
 
@@ -22,7 +22,7 @@ async function handleLogout(request: NextRequest): Promise<NextResponse> {
   const fallbackReturnTo = settings ? "/login" : "/";
   const returnTo = sanitizeReturnTo(request.nextUrl.searchParams.get("returnTo") ?? fallbackReturnTo);
 
-  let redirectTarget = new URL(returnTo, request.url).toString();
+  let redirectTarget = new URL(returnTo, getExternalOrigin(request)).toString();
   if (settings) {
     const endSessionUrl = await resolveEndSessionUrl(settings);
     if (endSessionUrl) {

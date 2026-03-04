@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
 import { readSessionToken } from "@/lib/auth/session";
+import { getExternalOrigin } from "@/lib/server/auth/http";
 import { getAuthSettings } from "@/lib/server/auth/settings";
 
 const PUBLIC_ROUTE_PATHS = new Set(["/login", "/favicon.ico", "/robots.txt", "/sitemap.xml"]);
@@ -20,7 +21,7 @@ function isPublicPath(pathname: string): boolean {
 }
 
 function loginUrl(request: NextRequest): URL {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", getExternalOrigin(request));
   const returnTo = sanitizeReturnTo(`${request.nextUrl.pathname}${request.nextUrl.search}`);
   if (returnTo !== "/") {
     url.searchParams.set("returnTo", returnTo);
@@ -64,7 +65,7 @@ export async function proxy(request: NextRequest) {
     if (request.nextUrl.pathname === "/login") {
       const valid = await isValidSession(request);
       if (valid) {
-        return NextResponse.redirect(new URL("/", request.url));
+        return NextResponse.redirect(new URL("/", getExternalOrigin(request)));
       }
     }
 

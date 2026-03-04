@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createTransactionToken } from "@/lib/auth/session";
-import { requestedReturnTo, isSecureRequest } from "@/lib/server/auth/http";
+import { getExternalOrigin, requestedReturnTo, isSecureRequest } from "@/lib/server/auth/http";
 import { buildAuthorizationUrl, pkceS256Challenge, randomBase64Url, resolveRedirectUri } from "@/lib/server/auth/oidc";
 import { getAuthSettings } from "@/lib/server/auth/settings";
 
 export const runtime = "nodejs";
 
 function redirectToLoginWithError(request: NextRequest, message: string, returnTo: string): NextResponse {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", getExternalOrigin(request));
   url.searchParams.set("error", message);
   if (returnTo !== "/") {
     url.searchParams.set("returnTo", returnTo);

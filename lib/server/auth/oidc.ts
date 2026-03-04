@@ -2,6 +2,7 @@ import { base64UrlDecodeToBytes, base64UrlDecodeToString, base64UrlEncodeBytes }
 
 import type { NextRequest } from "next/server";
 
+import { getExternalOrigin } from "@/lib/server/auth/http";
 import type { AuthSettings } from "@/lib/server/auth/settings";
 
 const encoder = new TextEncoder();
@@ -345,24 +346,7 @@ export function resolveRedirectUri(settings: AuthSettings, request: NextRequest)
   if (settings.redirectUrl) {
     return settings.redirectUrl;
   }
-
-  const forwardedProto = request.headers
-    .get("x-forwarded-proto")
-    ?.split(",")
-    .map((value) => value.trim())
-    .find((value) => value.length > 0);
-
-  const forwardedHost = request.headers
-    .get("x-forwarded-host")
-    ?.split(",")
-    .map((value) => value.trim())
-    .find((value) => value.length > 0);
-
-  if (forwardedProto && forwardedHost) {
-    return `${forwardedProto}://${forwardedHost}/api/auth/callback`;
-  }
-
-  return new URL("/api/auth/callback", request.nextUrl).toString();
+  return `${getExternalOrigin(request)}/api/auth/callback`;
 }
 
 export function buildAuthorizationUrl(
