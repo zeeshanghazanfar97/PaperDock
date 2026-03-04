@@ -49,17 +49,27 @@ async function watchPrintCompletion(jobId: string, printJobId: string) {
 
   updateJobStatus({
     jobId,
-    status: "failed",
-    errorMessage: `Timed out waiting for print job ${printJobId} to finish`
+    status: "completed",
+    errorMessage: null,
+    metaPatch: {
+      printJobId,
+      completionTrackingTimedOut: true
+    }
   });
 
   appendJobEvent({
     jobId,
-    eventType: "print_timeout",
+    eventType: "print_completion_tracking_timeout",
     payload: {
       printJobId,
       timeoutMs: config.PRINT_WATCH_TIMEOUT_MS
     }
+  });
+
+  logInfo("print completion tracking timed out; marking as completed", {
+    jobId,
+    printJobId,
+    timeoutMs: config.PRINT_WATCH_TIMEOUT_MS
   });
 }
 

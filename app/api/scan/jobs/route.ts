@@ -8,6 +8,7 @@ import { isScanRunning, startScanJob } from "@/lib/server/scan-manager";
 export const runtime = "nodejs";
 
 const requestSchema = z.object({
+  device: z.string().min(1).optional(),
   dpi: z.number().int().min(75).max(600).default(150),
   mode: z.enum(["Color", "Gray", "Lineart"]).default("Color"),
   format: z.enum(["png", "jpeg", "tiff", "pnm"]).default("png")
@@ -37,6 +38,7 @@ export async function POST(request: Request) {
     type: "scan",
     status: "queued",
     meta: {
+      requestedDevice: parsed.data.device ?? null,
       requestedDpi: parsed.data.dpi,
       requestedMode: parsed.data.mode,
       requestedFormat: parsed.data.format
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
   });
 
   void startScanJob(job.id, {
+    device: parsed.data.device,
     dpi: parsed.data.dpi,
     mode: parsed.data.mode,
     format: parsed.data.format

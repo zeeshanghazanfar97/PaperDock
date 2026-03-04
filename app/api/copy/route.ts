@@ -15,6 +15,7 @@ import {
 export const runtime = "nodejs";
 
 const requestSchema = z.object({
+  device: z.string().min(1).optional(),
   dpi: z.number().int().min(75).max(600).default(150),
   mode: z.enum(["Color", "Gray", "Lineart"]).default("Color"),
   printer: z.string().min(1).optional(),
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
     meta: {
       operation: "copy",
       printer,
+      device: parsed.data.device ?? null,
       copies: parsed.data.copies,
       dpi: parsed.data.dpi,
       mode: parsed.data.mode,
@@ -95,6 +97,7 @@ export async function POST(request: Request) {
     eventType: "copy_started",
     payload: {
       printer,
+      device: parsed.data.device ?? null,
       copies: parsed.data.copies,
       dpi: parsed.data.dpi,
       mode: parsed.data.mode
@@ -122,6 +125,7 @@ export async function POST(request: Request) {
 
     const proxy = await requestProxyCopy({
       scan: {
+        device: parsed.data.device ?? null,
         resolution: parsed.data.dpi,
         mode: parsed.data.mode,
         format: "png"

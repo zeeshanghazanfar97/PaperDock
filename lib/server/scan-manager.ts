@@ -18,6 +18,7 @@ import { scanEventHub } from "@/lib/server/scan-events";
 import type { SseJobEvent } from "@/lib/types/jobs";
 
 interface ScanOptions {
+  device?: string;
   dpi: number;
   mode: ScannerProxyColorMode;
   format: ScannerProxyOutputFormat;
@@ -172,6 +173,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
     jobId,
     status: "running",
     metaPatch: {
+      device: options.device ?? null,
       dpi: options.dpi,
       mode: options.mode,
       outputFormat: options.format
@@ -182,6 +184,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
     jobId,
     eventType: "scan_started",
     payload: {
+      device: options.device ?? null,
       dpi: options.dpi,
       mode: options.mode,
       format: options.format
@@ -199,6 +202,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
   try {
     const completedEvent = await requestProxyScanProgress(
       {
+        device: options.device ?? null,
         resolution: options.dpi,
         mode: options.mode,
         format: options.format,
@@ -254,6 +258,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
       jobId,
       status: "completed",
       metaPatch: {
+        device: options.device ?? null,
         dpi: options.dpi,
         mode: options.mode,
         outputFormat: options.format,
@@ -269,6 +274,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
       eventType: "scan_completed",
       payload: {
         ...payload,
+        device: options.device ?? null,
         filename: artifact.filename,
         outputFormat: options.format,
         sizeBytes: artifact.sizeBytes
@@ -277,6 +283,7 @@ export async function startScanJob(jobId: string, options: ScanOptions) {
 
     logInfo("scan completed via proxy", {
       jobId,
+      device: options.device ?? null,
       dpi: options.dpi,
       mode: options.mode,
       format: options.format,

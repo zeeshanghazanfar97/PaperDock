@@ -16,6 +16,7 @@ import {
 export const runtime = "nodejs";
 
 const requestSchema = z.object({
+  device: z.string().min(1).optional(),
   resolution: z.number().int().min(75).max(600).default(150),
   color_mode: z.enum(["Color", "Gray", "Lineart"]).default("Color"),
   output_format: z.enum(["png", "jpeg", "tiff", "pnm"]).default("png")
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await requestProxyScan({
+      device: parsed.data.device ?? null,
       resolution: parsed.data.resolution,
       mode: parsed.data.color_mode,
       format,
