@@ -9,8 +9,7 @@ export const runtime = "nodejs";
 
 const requestSchema = z.object({
   dpi: z.number().int().min(75).max(600).default(150),
-  mode: z.enum(["Color", "Gray"]).default("Color"),
-  scannerDeviceId: z.string().trim().min(1).max(256).optional()
+  mode: z.enum(["Color", "Gray"]).default("Color")
 });
 
 export async function POST(request: Request) {
@@ -38,15 +37,13 @@ export async function POST(request: Request) {
     status: "queued",
     meta: {
       requestedDpi: parsed.data.dpi,
-      requestedMode: parsed.data.mode,
-      requestedScannerDeviceId: parsed.data.scannerDeviceId ?? null
+      requestedMode: parsed.data.mode
     }
   });
 
   void startScanJob(job.id, {
     dpi: parsed.data.dpi,
-    mode: parsed.data.mode,
-    scannerDeviceId: parsed.data.scannerDeviceId
+    mode: parsed.data.mode
   }).catch(() => {
     // errors are handled and persisted inside the manager
   });

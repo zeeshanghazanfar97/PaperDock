@@ -5,15 +5,11 @@ import { discoverScanners } from "@/lib/server/scanner";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export async function GET() {
   bootstrapServer();
 
   try {
-    const { searchParams } = new URL(request.url);
-    const refresh = searchParams.get("refresh");
-    const forceRefresh = refresh === "1" || refresh === "true";
-
-    const scanners = await discoverScanners({ forceRefresh });
+    const scanners = await discoverScanners();
     return NextResponse.json({
       scanners,
       selectedScanner: scanners[0] ?? null

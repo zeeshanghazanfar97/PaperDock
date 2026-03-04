@@ -2,7 +2,7 @@
 
 import { type DragEvent as ReactDragEvent, type FormEvent, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { Crop, Download, FileText, ImageIcon, Loader2, MoonStar, RefreshCw, RotateCcw, RotateCw, ScanLine, SendHorizontal, Sun, UploadCloud, X } from "lucide-react";
+import { Crop, Download, FileText, ImageIcon, MoonStar, RefreshCw, RotateCcw, RotateCw, ScanLine, SendHorizontal, Sun, UploadCloud, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -66,20 +66,6 @@ type PrintOrientation = "auto" | "portrait" | "landscape";
 type PrintSides = "one-sided" | "two-sided-long-edge" | "two-sided-short-edge";
 type CropRect = { x: number; y: number; width: number; height: number };
 type EditorBox = { x: number; y: number; width: number; height: number; scale: number; sourceWidth: number; sourceHeight: number };
-type PrintPreviewPage = { id: string; src: string; width: number; height: number; pageNumber: number };
-type PrintMediaOption = { value: string; label: string; widthMm: number; heightMm: number };
-
-const PRINT_MEDIA_OPTIONS: PrintMediaOption[] = [
-  { value: "A4", label: "A4 (210 x 297 mm)", widthMm: 210, heightMm: 297 },
-  { value: "Letter", label: "Letter (8.5 x 11 in)", widthMm: 216, heightMm: 279 },
-  { value: "Legal", label: "Legal (8.5 x 14 in)", widthMm: 216, heightMm: 356 },
-  { value: "A5", label: "A5 (148 x 210 mm)", widthMm: 148, heightMm: 210 },
-  { value: "A3", label: "A3 (297 x 420 mm)", widthMm: 297, heightMm: 420 },
-  { value: "B5", label: "B5 (176 x 250 mm)", widthMm: 176, heightMm: 250 },
-  { value: "Executive", label: "Executive (7.25 x 10.5 in)", widthMm: 184, heightMm: 267 }
-];
-
-const DEFAULT_MEDIA = "A4";
 
 function decodeBase64(input: string) {
   const raw = atob(input);
@@ -167,21 +153,6 @@ function parsePageRangeInput(value: string, maxPage?: number) {
   return { valid: true, normalized, firstPage };
 }
 
-function expandNormalizedPageRange(normalized: string) {
-  const pages: number[] = [];
-
-  for (const segment of normalized.split(",")) {
-    const [startRaw, endRaw] = segment.split("-");
-    const start = Number(startRaw);
-    const end = endRaw ? Number(endRaw) : start;
-    for (let page = start; page <= end; page += 1) {
-      pages.push(page);
-    }
-  }
-
-  return Array.from(new Set(pages));
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -220,34 +191,16 @@ function dataUrlToBytes(dataUrl: string) {
   return bytes;
 }
 
-function getSelectedMedia(media: string) {
-  return PRINT_MEDIA_OPTIONS.find((item) => item.value === media) ?? PRINT_MEDIA_OPTIONS[0];
-}
-
-function getPreviewOrientation(sourceAspect: number, requestedOrientation: PrintOrientation): "portrait" | "landscape" {
-  if (requestedOrientation === "portrait") {
-    return "portrait";
-  }
-  if (requestedOrientation === "landscape") {
-    return "landscape";
-  }
-  return sourceAspect >= 1 ? "landscape" : "portrait";
-}
-
 export function Dashboard() {
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
   const [scanners, setScanners] = useState<ScannerInfo[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
-  const [selectedScannerDeviceId, setSelectedScannerDeviceId] = useState<string>("");
   const [copies, setCopies] = useState<number>(1);
-  const [media, setMedia] = useState<string>(DEFAULT_MEDIA);
+  const [media, setMedia] = useState<string>("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [printDropActive, setPrintDropActive] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [printPreviewPages, setPrintPreviewPages] = useState<PrintPreviewPage[]>([]);
-  const [printPreviewLoading, setPrintPreviewLoading] = useState(false);
-  const [printPreviewError, setPrintPreviewError] = useState<string | null>(null);
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   const [pageMode, setPageMode] = useState<PageMode>("all");
   const [singlePage, setSinglePage] = useState<number>(1);
@@ -268,7 +221,6 @@ export function Dashboard() {
   const [editorBusy, setEditorBusy] = useState(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [refreshingScanners, setRefreshingScanners] = useState<boolean>(false);
   const [historyType, setHistoryType] = useState<string>("all");
   const [historyStatus, setHistoryStatus] = useState<string>("all");
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -309,22 +261,15 @@ export function Dashboard() {
     return parsePageRangeInput(pageRange, pdfPageCount ?? undefined);
   }, [pageMode, pageRange, pdfPageCount]);
 
-  const selectedMedia = useMemo(() => getSelectedMedia(media), [media]);
-
-  const previewSheets = useMemo(() => {
-    if (printSides === "one-sided") {
-      return printPreviewPages.map((frontPage) => ({ frontPage, backPage: null as PrintPreviewPage | null }));
+  const previewPdfPage = useMemo(() => {
+    if (pageMode === "single") {
+      return singlePage;
     }
-
-    const sheets: Array<{ frontPage: PrintPreviewPage; backPage: PrintPreviewPage | null }> = [];
-    for (let index = 0; index < printPreviewPages.length; index += 2) {
-      sheets.push({
-        frontPage: printPreviewPages[index],
-        backPage: printPreviewPages[index + 1] ?? null
-      });
+    if (pageMode === "range" && parsedRangeForPreview?.valid) {
+      return parsedRangeForPreview.firstPage;
     }
-    return sheets;
-  }, [printPreviewPages, printSides]);
+    return 1;
+  }, [pageMode, parsedRangeForPreview, singlePage]);
 
   useEffect(() => {
     const isDark = document.documentElement.classList.contains("dark");
@@ -332,150 +277,55 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     let localPreviewUrl: string | null = null;
-    if (!uploadFile) {
-      setPreviewUrl(null);
-      setPdfPageCount(null);
-      setPrintPreviewPages([]);
-      setPrintPreviewError(null);
-      return;
+
+    async function setupPreview() {
+      if (!uploadFile) {
+        setPreviewUrl(null);
+        setPdfPageCount(null);
+        return;
+      }
+
+      localPreviewUrl = URL.createObjectURL(uploadFile);
+      setPreviewUrl(localPreviewUrl);
+
+      if (!isPdfUpload(uploadFile)) {
+        setPdfPageCount(null);
+        return;
+      }
+
+      try {
+        const { PDFDocument } = await import("pdf-lib");
+        const bytes = await uploadFile.arrayBuffer();
+        const document = await PDFDocument.load(bytes);
+
+        if (cancelled) {
+          return;
+        }
+
+        const count = document.getPageCount();
+        setPdfPageCount(count);
+        setSinglePage((prev) => Math.min(Math.max(1, prev), count));
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setPdfPageCount(null);
+        setPageMode("all");
+        toast.error("Could not read PDF pages. Printing will use all pages unless you set a range manually.");
+      }
     }
 
-    localPreviewUrl = URL.createObjectURL(uploadFile);
-    setPreviewUrl(localPreviewUrl);
+    void setupPreview();
 
     return () => {
+      cancelled = true;
       if (localPreviewUrl) {
         URL.revokeObjectURL(localPreviewUrl);
       }
     };
   }, [uploadFile]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function renderPrintPreview() {
-      if (!uploadFile || !previewUrl) {
-        setPrintPreviewPages([]);
-        setPrintPreviewLoading(false);
-        setPrintPreviewError(null);
-        return;
-      }
-
-      setPrintPreviewLoading(true);
-      setPrintPreviewError(null);
-
-      try {
-        if (isPdfUpload(uploadFile)) {
-          const fileBytes = await uploadFile.arrayBuffer();
-          const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-          const loadingTask = pdfjs.getDocument({ data: fileBytes });
-          const pdfDocument = await loadingTask.promise;
-
-          if (cancelled) {
-            await pdfDocument.destroy();
-            return;
-          }
-
-          setPdfPageCount(pdfDocument.numPages);
-          setSinglePage((prev) => Math.min(Math.max(1, prev), pdfDocument.numPages));
-
-          let pageNumbers: number[] = [];
-          if (pageMode === "single") {
-            pageNumbers = [Math.min(Math.max(1, singlePage), pdfDocument.numPages)];
-          } else if (pageMode === "range") {
-            const parsed = parsePageRangeInput(pageRange, pdfDocument.numPages);
-            if (!parsed.valid) {
-              setPrintPreviewPages([]);
-              setPrintPreviewError(parsed.error ?? "Invalid page range");
-              await pdfDocument.destroy();
-              return;
-            }
-            pageNumbers = expandNormalizedPageRange(parsed.normalized).filter((value) => value >= 1 && value <= pdfDocument.numPages);
-          } else {
-            pageNumbers = Array.from({ length: pdfDocument.numPages }, (_, index) => index + 1);
-          }
-
-          const renderedPages: PrintPreviewPage[] = [];
-
-          for (const pageNumber of pageNumbers) {
-            if (cancelled) {
-              await pdfDocument.destroy();
-              return;
-            }
-
-            const page = await pdfDocument.getPage(pageNumber);
-            const rawViewport = page.getViewport({ scale: 1 });
-            const longestSide = Math.max(rawViewport.width, rawViewport.height);
-            const scale = Math.min(1.5, Math.max(0.35, 1200 / Math.max(1, longestSide)));
-            const viewport = page.getViewport({ scale });
-            const canvas = document.createElement("canvas");
-            canvas.width = Math.max(1, Math.round(viewport.width));
-            canvas.height = Math.max(1, Math.round(viewport.height));
-
-            const context = canvas.getContext("2d");
-            if (!context) {
-              continue;
-            }
-
-            await page.render({ canvasContext: context, viewport }).promise;
-
-            renderedPages.push({
-              id: `pdf-${pageNumber}`,
-              src: canvas.toDataURL("image/png"),
-              width: canvas.width,
-              height: canvas.height,
-              pageNumber
-            });
-          }
-
-          await pdfDocument.destroy();
-
-          if (cancelled) {
-            return;
-          }
-
-          setPrintPreviewPages(renderedPages);
-          return;
-        }
-
-        const image = await loadImageElement(previewUrl);
-        if (cancelled) {
-          return;
-        }
-
-        setPdfPageCount(null);
-        setPrintPreviewPages([
-          {
-            id: "image-1",
-            src: previewUrl,
-            width: image.naturalWidth,
-            height: image.naturalHeight,
-            pageNumber: 1
-          }
-        ]);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setPrintPreviewPages([]);
-        setPrintPreviewError(error instanceof Error ? error.message : "Failed to render print preview");
-        if (isPdfUpload(uploadFile)) {
-          setPdfPageCount(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setPrintPreviewLoading(false);
-        }
-      }
-    }
-
-    void renderPrintPreview();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [uploadFile, previewUrl, pageMode, singlePage, pageRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -500,12 +350,9 @@ export function Dashboard() {
           return;
         }
 
-        const scannerItems = (scannersJson.scanners ?? []) as ScannerInfo[];
-
         setPrinters(printersJson.printers ?? []);
-        setScanners(scannerItems);
+        setScanners(scannersJson.scanners ?? []);
         setJobs(jobsJson.items ?? []);
-        setSelectedScannerDeviceId(scannersJson.selectedScanner?.deviceId ?? scannerItems[0]?.deviceId ?? "");
 
         const nextDefault =
           printersJson.defaultPrinter ??
@@ -581,32 +428,6 @@ export function Dashboard() {
       setJobs(json.items ?? []);
     } finally {
       setRefreshing(false);
-    }
-  }
-
-  async function refreshScanners(forceRefresh = true) {
-    try {
-      setRefreshingScanners(true);
-      const query = forceRefresh ? "?refresh=1" : "";
-      const response = await fetch(`/api/scanners${query}`, { cache: "no-store" });
-      const json = await response.json();
-
-      if (!response.ok) {
-        throw new Error(json.error ?? "Failed to refresh scanners");
-      }
-
-      const nextScanners = (json.scanners ?? []) as ScannerInfo[];
-      setScanners(nextScanners);
-      setSelectedScannerDeviceId((prev) => {
-        if (prev && nextScanners.some((scanner) => scanner.deviceId === prev)) {
-          return prev;
-        }
-        return json.selectedScanner?.deviceId ?? nextScanners[0]?.deviceId ?? "";
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to refresh scanners");
-    } finally {
-      setRefreshingScanners(false);
     }
   }
 
@@ -1227,8 +1048,8 @@ export function Dashboard() {
     body.set("printer", selectedPrinter);
     body.set("copies", String(copies));
 
-    if (media) {
-      body.set("media", media);
+    if (media.trim()) {
+      body.set("media", media.trim());
     }
 
     if (effectivePageRanges) {
@@ -1256,8 +1077,6 @@ export function Dashboard() {
 
     setPreviewUrl(null);
     setPdfPageCount(null);
-    setPrintPreviewPages([]);
-    setPrintPreviewError(null);
 
     void refreshJobs();
   }
@@ -1280,8 +1099,7 @@ export function Dashboard() {
       },
       body: JSON.stringify({
         dpi: Number(scanDpi),
-        mode: scanMode,
-        scannerDeviceId: selectedScannerDeviceId || undefined
+        mode: scanMode
       })
     });
 
@@ -1345,47 +1163,6 @@ export function Dashboard() {
     setTheme(nextTheme);
     document.documentElement.classList.toggle("dark", isDark);
     window.localStorage.setItem("theme", nextTheme);
-  }
-
-  function renderPreviewPageCard(page: PrintPreviewPage | null, sideLabel: "Front" | "Back", sheetIndex: number) {
-    if (!page) {
-      return (
-        <div className="space-y-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{sideLabel} (blank)</p>
-          <div className="flex aspect-[210/297] items-center justify-center rounded-md border border-dashed bg-card/40 text-xs text-muted-foreground">
-            No page on this side
-          </div>
-        </div>
-      );
-    }
-
-    const sourceAspect = page.width / Math.max(1, page.height);
-    const previewOrientation = getPreviewOrientation(sourceAspect, printOrientation);
-    const mediaAspect = selectedMedia.widthMm / selectedMedia.heightMm;
-    const paperAspect = previewOrientation === "landscape" ? 1 / mediaAspect : mediaAspect;
-    const shouldRotate = (previewOrientation === "landscape") !== (sourceAspect >= 1);
-
-    const imageFitClass =
-      printScaling === "fill" ? "object-cover" : printScaling === "none" ? "object-scale-down" : "object-contain";
-
-    return (
-      <div className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {sideLabel} • Page {page.pageNumber}
-        </p>
-        <div className="mx-auto w-full max-w-[240px] rounded-md border bg-white p-2 shadow-sm dark:bg-zinc-950" style={{ aspectRatio: String(paperAspect) }}>
-          <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-sm bg-muted/40">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={page.src}
-              alt={`Sheet ${sheetIndex + 1} ${sideLabel} page ${page.pageNumber}`}
-              className={cn("h-full w-full transition-transform", imageFitClass)}
-              style={shouldRotate ? { transform: "rotate(90deg)" } : undefined}
-            />
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -1526,19 +1303,8 @@ export function Dashboard() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Media (optional)</Label>
-                    <Select value={media} onValueChange={setMedia}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PRINT_MEDIA_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="media">Media (optional)</Label>
+                    <Input id="media" placeholder="e.g. A4, Letter" value={media} onChange={(event) => setMedia(event.target.value)} />
                   </div>
 
                   {uploadedPdf ? (
@@ -1649,49 +1415,21 @@ export function Dashboard() {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Preview</Label>
-                    {printPreviewPages.length ? (
-                      <p className="text-xs text-muted-foreground">
-                        {printSides === "one-sided"
-                          ? `${printPreviewPages.length} page(s)`
-                          : `${previewSheets.length} sheet(s), ${printPreviewPages.length} page(s)`}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="h-[480px] overflow-auto rounded-lg border bg-muted/30 p-3">
+                  <Label>Preview</Label>
+                  <div className="h-[480px] overflow-hidden rounded-lg border bg-muted/30">
                     {!previewUrl ? (
                       <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
                         Upload a PDF or image to preview it here.
                       </div>
-                    ) : printPreviewLoading ? (
-                      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Rendering preview...
-                      </div>
-                    ) : printPreviewError ? (
-                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-destructive">{printPreviewError}</div>
-                    ) : previewSheets.length ? (
-                      <div className="space-y-3">
-                        {previewSheets.map((sheet, sheetIndex) => (
-                          <div key={`preview-sheet-${sheetIndex}-${sheet.frontPage.id}`} className="rounded-lg border bg-card/70 p-3">
-                            <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
-                              <span>Sheet {sheetIndex + 1}</span>
-                              {printSides !== "one-sided" ? (
-                                <span>{printSides === "two-sided-long-edge" ? "Duplex (long edge)" : "Duplex (short edge)"}</span>
-                              ) : null}
-                            </div>
-                            <div className={cn("grid gap-3", printSides === "one-sided" ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
-                              {renderPreviewPageCard(sheet.frontPage, "Front", sheetIndex)}
-                              {printSides !== "one-sided" ? renderPreviewPageCard(sheet.backPage, "Back", sheetIndex) : null}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                    ) : uploadedPdf ? (
+                      <iframe
+                        title="PDF preview"
+                        src={`${previewUrl}#page=${Math.max(1, previewPdfPage)}&view=FitH`}
+                        className="h-full w-full"
+                      />
                     ) : (
-                      <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                        No preview pages to display for the current selection.
-                      </div>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={previewUrl} alt="Uploaded preview" className="h-full w-full object-contain" />
                     )}
                   </div>
                 </div>
@@ -1715,32 +1453,10 @@ export function Dashboard() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Scanner</Label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 px-2 text-xs"
-                      onClick={() => void refreshScanners(true)}
-                      disabled={refreshingScanners}
-                    >
-                      <RefreshCw className={cn("h-3.5 w-3.5", refreshingScanners && "animate-spin")} />
-                      Refresh List
-                    </Button>
+                  <Label>Scanner</Label>
+                  <div className="rounded-md border bg-card/80 px-3 py-2 text-sm text-muted-foreground">
+                    {scanners[0]?.description ?? "No scanner detected"}
                   </div>
-                  <Select value={selectedScannerDeviceId} onValueChange={setSelectedScannerDeviceId} disabled={!scanners.length}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="No scanner detected" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {scanners.map((scanner) => (
-                        <SelectItem key={scanner.deviceId} value={scanner.deviceId}>
-                          {scanner.description}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -1772,7 +1488,7 @@ export function Dashboard() {
                 </div>
 
                 <div className="flex flex-col gap-2 pt-2">
-                  <Button onClick={onStartScan} disabled={Boolean(activeScanJobId) || !selectedScannerDeviceId}>
+                  <Button onClick={onStartScan} disabled={Boolean(activeScanJobId)}>
                     Start Scan
                   </Button>
                   <Button variant="outline" onClick={onCancelScan} disabled={!activeScanJobId}>
@@ -1891,60 +1607,40 @@ export function Dashboard() {
                   </Button>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Edited Output</Label>
-                  <div className="grid gap-2 grid-cols-2">
-                    <Button
-                      variant="secondary"
-                      className="h-auto min-h-16 flex-col gap-1 py-2 text-xs"
-                      onClick={() => void downloadEditedPng()}
-                      disabled={!editorImageLoaded || editorBusy}
-                    >
-                      <ImageIcon className="h-4 w-4" />
-                      Edited PNG
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="h-auto min-h-16 flex-col gap-1 py-2 text-xs"
-                      onClick={() => void downloadEditedPdf()}
-                      disabled={!editorImageLoaded || editorBusy}
-                    >
-                      <FileText className="h-4 w-4" />
-                      Edited PDF
-                    </Button>
-                  </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button variant="secondary" onClick={() => void downloadEditedPng()} disabled={!editorImageLoaded || editorBusy}>
+                    <Download className="h-4 w-4" />
+                    Download Edited PNG
+                  </Button>
+                  <Button variant="secondary" onClick={() => void downloadEditedPdf()} disabled={!editorImageLoaded || editorBusy}>
+                    <Download className="h-4 w-4" />
+                    Download Edited PDF
+                  </Button>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Original Output</Label>
-                  <div className="grid gap-2 grid-cols-2">
-                    <Button
-                      variant="outline"
-                      className="h-auto min-h-16 flex-col gap-1 py-2 text-xs"
-                      disabled={!scanDownloadUrls}
-                      onClick={() => {
-                        if (scanDownloadUrls) {
-                          window.open(scanDownloadUrls.pngUrl, "_blank");
-                        }
-                      }}
-                    >
-                      <Download className="h-4 w-4" />
-                      Original PNG
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-auto min-h-16 flex-col gap-1 py-2 text-xs"
-                      disabled={!scanDownloadUrls}
-                      onClick={() => {
-                        if (scanDownloadUrls) {
-                          window.open(scanDownloadUrls.pdfUrl, "_blank");
-                        }
-                      }}
-                    >
-                      <Download className="h-4 w-4" />
-                      Original PDF
-                    </Button>
-                  </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    variant="outline"
+                    disabled={!scanDownloadUrls}
+                    onClick={() => {
+                      if (scanDownloadUrls) {
+                        window.open(scanDownloadUrls.pngUrl, "_blank");
+                      }
+                    }}
+                  >
+                    Download Original PNG
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={!scanDownloadUrls}
+                    onClick={() => {
+                      if (scanDownloadUrls) {
+                        window.open(scanDownloadUrls.pdfUrl, "_blank");
+                      }
+                    }}
+                  >
+                    Download Original PDF
+                  </Button>
                 </div>
               </CardContent>
             </Card>

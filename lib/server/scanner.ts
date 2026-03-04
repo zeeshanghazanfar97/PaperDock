@@ -1,18 +1,11 @@
 import { CommandError, runCommand } from "@/lib/server/commands";
 import { config } from "@/lib/server/config";
 import { getCacheValue, setCacheValue } from "@/lib/server/job-store";
-import { isScannerProxyEnabled, readResponseJson, scannerProxyFetch } from "@/lib/server/scanner-proxy";
 
 export interface ScannerInfo {
   deviceId: string;
   description: string;
 }
-
-interface DiscoverScannersOptions {
-  forceRefresh?: boolean;
-}
-
-const SCANNERS_CACHE_KEY = "scanners";
 
 function normalizeMessage(input: string, maxChars = 320) {
   const normalized = input.replace(/\s+/g, " ").trim();
@@ -54,7 +47,13 @@ export function parseScannerList(output: string): ScannerInfo[] {
     .filter((item): item is ScannerInfo => Boolean(item));
 }
 
-async function scanScannersFromSystem(): Promise<ScannerInfo[]> {
+export async function discoverScanners(): Promise<ScannerInfo[]> {
+  const cached = getCacheValue<ScannerInfo[]>("scanners");
+
+  if (cached && Date.now() - cached.updatedAt < 15_000) {
+    return cached.value;
+  }
+
   let scanners: ScannerInfo[] = [];
 
   try {
@@ -74,56 +73,8 @@ async function scanScannersFromSystem(): Promise<ScannerInfo[]> {
     }
   }
 
-  return scanners;
-}
-
-function isScannerInfo(value: unknown): value is ScannerInfo {
-  if (typeof value !== "object" || value === null) {
-    return false;
+  if (scanners.length) {
+    setCacheValue("scanners", scanners);
   }
-
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.deviceId === "string" && typeof candidate.description === "string";
-}
-
-async function scanScannersFromProxy(forceRefresh = false): Promise<ScannerInfo[]> {
-  const query = forceRefresh ? "?refresh=1" : "";
-  const response = await scannerProxyFetch(`/scanners${query}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json"
-    }
-  });
-
-  const payload = await readResponseJson(response);
-  if (!response.ok) {
-    const errorMessage =
-      typeof payload.error === "string"
-        ? payload.error
-        : `scanner proxy request failed with status ${response.status}`;
-    throw new Error(errorMessage);
-  }
-
-  const scanners = Array.isArray(payload.scanners) ? payload.scanners.filter(isScannerInfo) : [];
-  return scanners;
-}
-
-export function getCachedScanners(): ScannerInfo[] | null {
-  const cached = getCacheValue<ScannerInfo[]>(SCANNERS_CACHE_KEY);
-  return cached?.value ?? null;
-}
-
-export async function discoverScanners(options: DiscoverScannersOptions = {}): Promise<ScannerInfo[]> {
-  if (!options.forceRefresh) {
-    const cached = getCachedScanners();
-    if (cached) {
-      return cached;
-    }
-  }
-
-  const scanners = isScannerProxyEnabled()
-    ? await scanScannersFromProxy(options.forceRefresh)
-    : await scanScannersFromSystem();
-  setCacheValue(SCANNERS_CACHE_KEY, scanners);
   return scanners;
 }
