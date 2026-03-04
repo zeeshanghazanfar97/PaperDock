@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
       return redirectToLogin(request, "State validation failed.", transaction.returnTo);
     }
 
-    const redirectUri = resolveRedirectUri(settings, request.nextUrl);
+    const redirectUri = resolveRedirectUri(settings, request);
     const tokenResponse = await exchangeAuthorizationCode({
       settings,
       code,

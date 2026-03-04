@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const nonce = randomBase64Url(32);
     const codeVerifier = randomBase64Url(48);
     const codeChallenge = await pkceS256Challenge(codeVerifier);
-    const redirectUri = resolveRedirectUri(settings, request.nextUrl);
+    const redirectUri = resolveRedirectUri(settings, request);
 
     const transactionToken = await createTransactionToken(
       {

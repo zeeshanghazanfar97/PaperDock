@@ -1,5 +1,7 @@
 import { base64UrlDecodeToBytes, base64UrlDecodeToString, base64UrlEncodeBytes } from "@/lib/auth/signed-token";
 
+import type { NextRequest } from "next/server";
+
 import type { AuthSettings } from "@/lib/server/auth/settings";
 
 const encoder = new TextEncoder();
@@ -339,11 +341,28 @@ export async function pkceS256Challenge(verifier: string): Promise<string> {
   return base64UrlEncodeBytes(new Uint8Array(digest));
 }
 
-export function resolveRedirectUri(settings: AuthSettings, requestUrl: URL): string {
+export function resolveRedirectUri(settings: AuthSettings, request: NextRequest): string {
   if (settings.redirectUrl) {
     return settings.redirectUrl;
   }
-  return new URL("/api/auth/callback", requestUrl).toString();
+
+  const forwardedProto = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+
+  const forwardedHost = request.headers
+    .get("x-forwarded-host")
+    ?.split(",")
+    .map((value) => value.trim())
+    .find((value) => value.length > 0);
+
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}/api/auth/callback`;
+  }
+
+  return new URL("/api/auth/callback", request.nextUrl).toString();
 }
 
 export function buildAuthorizationUrl(
