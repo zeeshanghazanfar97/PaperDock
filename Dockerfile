@@ -10,7 +10,11 @@ COPY package.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build \
+  && mkdir -p .next/standalone/.next \
+  && cp -r .next/static .next/standalone/.next/static \
+  && if [ -d public ]; then cp -r public .next/standalone/public; fi \
+  && npm prune --omit=dev
 
 ENV NODE_ENV=production
 ENV CUPS_HOST=10.2.1.103
