@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { config } from "@/lib/server/config";
 
 export type OptionPrimitive = string | number | boolean;
@@ -52,6 +55,11 @@ export interface PrintSettings {
 
 export interface ProxyPrintRequest extends PrintSettings {
   file_path: string;
+}
+
+export interface ProxyPrintUploadRequest extends PrintSettings {
+  filePath: string;
+  fileName?: string;
 }
 
 export interface ProxyPrintResponse {
@@ -163,6 +171,26 @@ function asNullableString(value: unknown) {
 
 function asNumber(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function contentTypeFromFilename(fileName: string) {
+  const ext = path.extname(fileName).toLowerCase();
+  if (ext === ".pdf") {
+    return "application/pdf";
+  }
+  if (ext === ".png") {
+    return "image/png";
+  }
+  if (ext === ".jpg" || ext === ".jpeg") {
+    return "image/jpeg";
+  }
+  if (ext === ".tif" || ext === ".tiff") {
+    return "image/tiff";
+  }
+  if (ext === ".pnm" || ext === ".pbm" || ext === ".pgm" || ext === ".ppm") {
+    return "image/x-portable-anymap";
+  }
+  return "application/octet-stream";
 }
 
 async function readErrorMessage(response: Response) {
@@ -355,6 +383,68 @@ export async function requestProxyPrintJob(request: ProxyPrintRequest, signal?: 
       "Content-Type": "application/json"
     }),
     body: JSON.stringify(request)
+  });
+
+  if (!response.ok) {
+    throw new ScannerProxyError(await readErrorMessage(response), response.status);
+  }
+
+  const payload = (await response.json()) as Record<string, unknown>;
+
+  return {
+    command: asStringArray(payload.command),
+    return_code: asNumber(payload.return_code),
+    job_id: asNullableString(payload.job_id),
+    stdout: asString(payload.stdout),
+    stderr: asString(payload.stderr)
+  };
+}
+
+export async function requestProxyPrintUpload(
+  request: ProxyPrintUploadRequest,
+  signal?: AbortSignal
+): Promise<ProxyPrintResponse> {
+  if (!fs.existsSync(request.filePath)) {
+    throw new Error(`Print upload file missing: ${request.filePath}`);
+  }
+
+  const fileName = request.fileName ?? path.basename(request.filePath);
+  const fileContent = fs.readFileSync(request.filePath);
+  const formData = new FormData();
+
+  formData.append("file", new Blob([fileContent], { type: contentTypeFromFilename(fileName) }), fileName);
+
+  if (request.printer) {
+    formData.set("printer", request.printer);
+  }
+  if (request.title) {
+    formData.set("title", request.title);
+  }
+  if (typeof request.copies === "number") {
+    formData.set("copies", String(request.copies));
+  }
+  if (typeof request.job_priority === "number") {
+    formData.set("job_priority", String(request.job_priority));
+  }
+  if (request.page_ranges) {
+    formData.set("page_ranges", request.page_ranges);
+  }
+  if (request.options) {
+    formData.set("options_json", JSON.stringify(request.options));
+  }
+  if (request.raw_args) {
+    formData.set("raw_args_json", JSON.stringify(request.raw_args));
+  }
+  if (typeof request.timeout_seconds === "number") {
+    formData.set("timeout_seconds", String(request.timeout_seconds));
+  }
+
+  const response = await fetch(buildProxyApiUrl("/print/upload"), {
+    method: "POST",
+    cache: "no-store",
+    signal,
+    headers: noStoreHeaders(),
+    body: formData
   });
 
   if (!response.ok) {

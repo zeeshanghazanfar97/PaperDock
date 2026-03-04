@@ -1,8 +1,10 @@
+import path from "node:path";
+
 import { config } from "@/lib/server/config";
 import { getCacheValue, setCacheValue } from "@/lib/server/job-store";
 import {
   requestProxyCancelPrintJob,
-  requestProxyPrintJob,
+  requestProxyPrintUpload,
   requestProxyPrintJobs,
   requestProxyPrinters,
   type OptionValue
@@ -67,8 +69,10 @@ export async function submitPrintToCups(params: {
     options.sides = params.sides;
   }
 
-  const result = await requestProxyPrintJob({
-    file_path: params.filePath,
+  const result = await requestProxyPrintUpload({
+    filePath: params.filePath,
+    fileName: path.basename(params.filePath),
+    title: path.basename(params.filePath),
     printer: params.printer,
     copies: params.copies,
     page_ranges: params.pageRanges ?? null,
