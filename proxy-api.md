@@ -2,6 +2,10 @@
 
 Comprehensive reference for the PaperDock Proxy HTTP API.
 
+Canonical Proxy API repository: [https://github.com/zeeshanghazanfar97/PaperDock-proxy](https://github.com/zeeshanghazanfar97/PaperDock-proxy)
+
+Note: this file is a local convenience reference. The GitHub repo above is the source of truth.
+
 - OpenAPI UI: `GET /docs`
 - OpenAPI JSON: `GET /openapi.json`
 - Default base URL: `http://<host>:8000`

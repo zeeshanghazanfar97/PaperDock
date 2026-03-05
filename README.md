@@ -7,6 +7,10 @@ Built with:
 - Next.js + shadcn/ui frontend.
 - SQLite + JSONL audit logs for history.
 
+Proxy API source of truth:
+- [PaperDock-proxy repository](https://github.com/zeeshanghazanfar97/PaperDock-proxy)
+- Local quick reference in this repo: `api.md`
+
 ## Features
 
 - Print section:
