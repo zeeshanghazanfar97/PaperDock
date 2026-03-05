@@ -9,7 +9,7 @@ Built with:
 
 Proxy API source of truth:
 - [PaperDock-proxy repository](https://github.com/zeeshanghazanfar97/PaperDock-proxy)
-- Local quick reference in this repo: `api.md`
+- Local quick reference in this repo: [Proxy API Docs](https://github.com/zeeshanghazanfar97/PaperDock/blob/main/proxy-api.md)
 
 ## Features
 
