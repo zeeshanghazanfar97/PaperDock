@@ -146,7 +146,7 @@ This mounts `./data` to `/data` in the container for DB, logs, uploads, and scan
 
 ## Data storage
 
-- SQLite DB: `${DATA_DIR}/web-printer.sqlite`
+- SQLite DB: `${DB_PATH:-./paperdock.sqlite}`
 - Uploads: `${DATA_DIR}/uploads`
 - Scans: `${DATA_DIR}/scans`
 - JSONL logs: `${DATA_DIR}/logs`

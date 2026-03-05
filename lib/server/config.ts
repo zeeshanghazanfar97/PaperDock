@@ -28,11 +28,12 @@ if (!parsed.success) {
 const env = parsed.data;
 const dataDir = env.DATA_DIR ?? path.join(process.cwd(), "data");
 const proxyApiUrl = env.PROXY_API_URL ?? env.SCANNER_PROXY_URL ?? "http://10.1.1.190:8000";
+const dbPath = env.DB_PATH?.trim() || path.join(process.cwd(), "paperdock.sqlite");
 
 export const config = {
   ...env,
   PROXY_API_URL: proxyApiUrl,
   SCANNER_PROXY_URL: proxyApiUrl,
   DATA_DIR: dataDir,
-  dbPath: env.DB_PATH ?? path.join(dataDir, "web-printer.sqlite")
+  dbPath
 };
