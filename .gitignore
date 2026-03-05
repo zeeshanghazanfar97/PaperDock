@@ -12,3 +12,5 @@ pnpm-debug.log*
 .env.production.local
 data
 .DS_Store
+.env
+tsconfig.tsbuildinfo

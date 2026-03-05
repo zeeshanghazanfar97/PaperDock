@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
 import { getExternalOrigin, isSecureRequest } from "@/lib/server/auth/http";
 import { resolveEndSessionUrl } from "@/lib/server/auth/oidc";
-import { getAuthSettings } from "@/lib/server/auth/settings";
+import { getAuthConfig } from "@/lib/server/auth/settings";
 
 export const runtime = "nodejs";
 
@@ -18,12 +18,13 @@ function clearCookie(response: NextResponse, request: NextRequest, cookieName: s
 }
 
 async function handleLogout(request: NextRequest): Promise<NextResponse> {
-  const settings = getAuthSettings();
-  const fallbackReturnTo = settings ? "/login" : "/";
+  const authConfig = getAuthConfig();
+  const fallbackReturnTo = authConfig.mode === "none" ? "/" : "/login";
   const returnTo = sanitizeReturnTo(request.nextUrl.searchParams.get("returnTo") ?? fallbackReturnTo);
 
   let redirectTarget = new URL(returnTo, getExternalOrigin(request)).toString();
-  if (settings) {
+  if (authConfig.mode === "oidc" && authConfig.oidc) {
+    const settings = authConfig.oidc;
     const endSessionUrl = await resolveEndSessionUrl(settings);
     if (endSessionUrl) {
       const providerLogoutUrl = new URL(endSessionUrl);
@@ -34,8 +35,14 @@ async function handleLogout(request: NextRequest): Promise<NextResponse> {
   }
 
   const response = NextResponse.redirect(redirectTarget);
-  clearCookie(response, request, settings?.sessionCookieName ?? "paperdock_session");
-  clearCookie(response, request, settings?.transactionCookieName ?? "paperdock_oidc_tx");
+  if (!authConfig.session) {
+    clearCookie(response, request, "paperdock_session");
+    clearCookie(response, request, "paperdock_oidc_tx");
+    return response;
+  }
+
+  clearCookie(response, request, authConfig.session.sessionCookieName);
+  clearCookie(response, request, authConfig.session.transactionCookieName);
   return response;
 }
 

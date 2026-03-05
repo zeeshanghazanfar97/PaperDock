@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
 import { readSessionToken } from "@/lib/auth/session";
 import { getExternalOrigin } from "@/lib/server/auth/http";
-import { getAuthSettings } from "@/lib/server/auth/settings";
+import { type AuthConfig, getAuthConfig } from "@/lib/server/auth/settings";
 
 const PUBLIC_ROUTE_PATHS = new Set(["/login", "/favicon.ico", "/robots.txt", "/sitemap.xml"]);
 const PUBLIC_ROUTE_PREFIXES = ["/_next/", "/api/auth/"];
@@ -40,30 +40,29 @@ function unauthorizedApiResponse(request: NextRequest): NextResponse {
   );
 }
 
-async function isValidSession(request: NextRequest): Promise<boolean> {
-  const settings = getAuthSettings();
-  if (!settings) {
+async function isValidSession(request: NextRequest, authConfig: AuthConfig): Promise<boolean> {
+  if (!authConfig.session) {
     return true;
   }
 
-  const token = request.cookies.get(settings.sessionCookieName)?.value;
+  const token = request.cookies.get(authConfig.session.sessionCookieName)?.value;
   if (!token) {
     return false;
   }
 
-  const session = await readSessionToken(token, settings.sessionSecret);
+  const session = await readSessionToken(token, authConfig.session.sessionSecret);
   return Boolean(session);
 }
 
 export async function proxy(request: NextRequest) {
-  const settings = getAuthSettings();
-  if (!settings) {
+  const authConfig = getAuthConfig();
+  if (authConfig.mode === "none") {
     return NextResponse.next();
   }
 
   if (isPublicPath(request.nextUrl.pathname)) {
     if (request.nextUrl.pathname === "/login") {
-      const valid = await isValidSession(request);
+      const valid = await isValidSession(request, authConfig);
       if (valid) {
         return NextResponse.redirect(new URL("/", getExternalOrigin(request)));
       }
@@ -72,7 +71,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const valid = await isValidSession(request);
+  const valid = await isValidSession(request, authConfig);
   if (valid) {
     return NextResponse.next();
   }

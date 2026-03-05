@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createTransactionToken } from "@/lib/auth/session";
 import { getExternalOrigin, requestedReturnTo, isSecureRequest } from "@/lib/server/auth/http";
 import { buildAuthorizationUrl, pkceS256Challenge, randomBase64Url, resolveRedirectUri } from "@/lib/server/auth/oidc";
-import { getAuthSettings } from "@/lib/server/auth/settings";
+import { getAuthConfig } from "@/lib/server/auth/settings";
 
 export const runtime = "nodejs";
 
@@ -18,13 +18,18 @@ function redirectToLoginWithError(request: NextRequest, message: string, returnT
 
 export async function GET(request: NextRequest) {
   const returnTo = requestedReturnTo(request);
-  const settings = getAuthSettings();
+  const authConfig = getAuthConfig();
 
-  if (!settings) {
-    return redirectToLoginWithError(request, "OIDC is not configured.", returnTo);
+  if (authConfig.mode === "none") {
+    return NextResponse.redirect(new URL(returnTo, getExternalOrigin(request)));
+  }
+
+  if (!authConfig.oidc) {
+    return redirectToLoginWithError(request, "SSO login is not enabled.", returnTo);
   }
 
   try {
+    const settings = authConfig.oidc;
     const state = randomBase64Url(32);
     const nonce = randomBase64Url(32);
     const codeVerifier = randomBase64Url(48);

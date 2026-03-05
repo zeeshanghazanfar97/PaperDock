@@ -1,6 +1,6 @@
 # PaperDock
 
-PaperDock is a self-hosted print, scan, and photocopy desk with OAuth2/OpenID Connect (OIDC) authentication support.
+PaperDock is a self-hosted print, scan, and photocopy desk with configurable authentication modes.
 
 Built with:
 - Proxy HTTP API for printer/scanner operations.
@@ -9,7 +9,7 @@ Built with:
 
 Proxy API source of truth:
 - [PaperDock-proxy repository](https://github.com/zeeshanghazanfar97/PaperDock-proxy)
-- Local quick reference in this repo: [Proxy API Docs](https://github.com/zeeshanghazanfar97/PaperDock/blob/main/proxy-api.md)
+- Local quick reference in this repo: [`api.md`](./api.md)
 
 ## Features
 
@@ -32,9 +32,10 @@ Proxy API source of truth:
   - Append-only JSONL audit stream in `/data/logs/jobs-YYYY-MM-DD.jsonl`.
 
 - Authentication:
-  - OIDC authorization code flow with PKCE.
-  - Signed HTTP-only session cookies.
-  - Login/logout routes compatible with Authentik.
+  - `none`: no login required.
+  - `password`: static username/password from `.env`.
+  - `oidc`: OAuth2/OIDC authorization code flow with PKCE (for Authentik and compatible providers).
+  - `both`: enable both `password` and `oidc`; users can sign in with either method.
 
 ## Environment
 
@@ -44,7 +45,25 @@ Important defaults:
 - `PROXY_API_URL=http://10.1.1.190:8000`
 - `DATA_DIR=/data`
 
-OIDC required values (when auth is enabled):
+## Authentication configuration
+
+Set `AUTH_MODE` in `.env`:
+- `AUTH_MODE=none`: no authentication.
+- `AUTH_MODE=password`: local static credentials.
+- `AUTH_MODE=oidc`: SSO via OAuth2/OpenID Connect.
+- `AUTH_MODE=both`: enable both SSO and local password login.
+
+Shared auth/session env:
+- `AUTH_SESSION_SECRET` (required for `password`, optional for `oidc`; defaults to `OIDC_CLIENT_SECRET` in oidc mode)
+- `AUTH_SESSION_COOKIE_NAME` (default `paperdock_session`)
+- `AUTH_TRANSACTION_COOKIE_NAME` (default `paperdock_oidc_tx`)
+- `AUTH_SESSION_TTL_SECONDS` (default `28800`)
+
+Password mode required env (`AUTH_MODE=password` or `AUTH_MODE=both`):
+- `AUTH_USERNAME`
+- `AUTH_PASSWORD`
+
+OIDC mode required env (`AUTH_MODE=oidc` or `AUTH_MODE=both`):
 - `OIDC_CLIENT_ID`
 - `OIDC_CLIENT_SECRET`
 - `OIDC_AUTHORIZATION_URL`
@@ -54,13 +73,15 @@ OIDC required values (when auth is enabled):
 Common optional values:
 - `OIDC_SCOPES` (default: `openid profile email`)
 - `OIDC_REDIRECT_URL` (defaults to `https://<your-host>/api/auth/callback`)
+- `OIDC_JWKS_URL` (optional override; usually discovered from issuer metadata)
 - `OIDC_END_SESSION_URL` (for provider logout)
-- `AUTH_SESSION_SECRET` (defaults to `OIDC_CLIENT_SECRET`)
+- `OIDC_TRANSACTION_TTL_SECONDS` (default `600`)
+- `OIDC_CLOCK_SKEW_SECONDS` (default `60`)
 
-Notes:
-- If no OIDC variables are set, PaperDock runs without auth.
-- If any required OIDC variable is set, all required OIDC variables must be set.
-- Lowercase aliases are also accepted (`client_id`, `client_secret`, `authorization_url`, `issuer_url`, `token_url`, `scopes`).
+Mode selection notes:
+- If `AUTH_MODE` is omitted, PaperDock auto-detects mode from env values.
+- If both OIDC and password env values are present and `AUTH_MODE` is omitted, auto-detection uses `both`.
+- Lowercase aliases are accepted for OIDC core fields (`client_id`, `client_secret`, `authorization_url`, `issuer_url`, `token_url`, `scopes`).
 
 ## Authentik Setup
 
@@ -104,6 +125,7 @@ This mounts `./data` to `/data` in the container for DB, logs, uploads, and scan
 - `GET /api/health`
 - `GET /api/auth/login`
 - `GET /api/auth/callback`
+- `POST /api/auth/password`
 - `GET /api/auth/logout`
 - `POST /api/auth/logout`
 - `GET /api/printers`
@@ -131,6 +153,6 @@ This mounts `./data` to `/data` in the container for DB, logs, uploads, and scan
 
 ## Notes
 
-- All routes except `/api/health` and `/api/auth/*` require authentication when OIDC is configured.
+ - All routes except `/api/health` and `/api/auth/*` require authentication when `AUTH_MODE` is `oidc`, `password`, or `both`.
 - Only one scan can run at a time.
 - Retention cleanup removes expired files but keeps job metadata and audit records.

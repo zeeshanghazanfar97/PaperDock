@@ -4,12 +4,12 @@ import { createSessionToken, readTransactionToken } from "@/lib/auth/session";
 import { sanitizeReturnTo } from "@/lib/auth/return-to";
 import { getExternalOrigin, isSecureRequest } from "@/lib/server/auth/http";
 import { exchangeAuthorizationCode, resolveRedirectUri, verifyIdToken } from "@/lib/server/auth/oidc";
-import { getAuthSettings } from "@/lib/server/auth/settings";
+import { getAuthConfig } from "@/lib/server/auth/settings";
 
 export const runtime = "nodejs";
 
 function redirectToLogin(request: NextRequest, message: string, returnTo = "/"): NextResponse {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", getExternalOrigin(request));
   url.searchParams.set("error", message);
   const safeReturnTo = sanitizeReturnTo(returnTo);
   if (safeReturnTo !== "/") {
@@ -29,10 +29,11 @@ function clearTransactionCookie(response: NextResponse, request: NextRequest, co
 }
 
 export async function GET(request: NextRequest) {
-  const settings = getAuthSettings();
-  if (!settings) {
-    return redirectToLogin(request, "OIDC is not configured.");
+  const authConfig = getAuthConfig();
+  if (!authConfig.oidc) {
+    return redirectToLogin(request, "SSO login is not enabled.");
   }
+  const settings = authConfig.oidc;
 
   const providerError = request.nextUrl.searchParams.get("error");
   if (providerError) {
