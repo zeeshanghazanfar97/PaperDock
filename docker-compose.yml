@@ -31,7 +31,7 @@ services:
       OIDC_TRANSACTION_TTL_SECONDS: ${OIDC_TRANSACTION_TTL_SECONDS:-600}
       OIDC_CLOCK_SKEW_SECONDS: ${OIDC_CLOCK_SKEW_SECONDS:-60}
     volumes:
-      - ./data:/data
+      - /home/zeeshan/self-hosted/volumes/PaperDock/data:/data
     networks:
       - traefik-public
     labels:

@@ -26,9 +26,9 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
-const dataDir = env.DATA_DIR ?? path.join(process.cwd(), "data");
+const dataDir = "/data";
 const proxyApiUrl = env.PROXY_API_URL ?? env.SCANNER_PROXY_URL ?? "http://10.1.1.190:8000";
-const dbPath = env.DB_PATH?.trim() || "/paperdock.sqlite";
+const dbPath = path.join(dataDir, "paperdock.sqlite");
 
 export const config = {
   ...env,
